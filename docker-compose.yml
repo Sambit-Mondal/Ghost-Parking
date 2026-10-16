@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgis/postgis:15-3.4
+    container_name: ghost-parking-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ghost_parking}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ghost_parking}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ghost-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ghost-parking-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ghost-network
+
+  gateway-express:
+    build:
+      context: ./gateway-express
+      dockerfile: Dockerfile
+    container_name: ghost-parking-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ghost_parking}?schema=public
+      REDIS_URL: redis://redis:6379
+      SEARCH_SERVICE_URL: http://search-engine-go:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ghost-network
+
+  search-engine-go:
+    build:
+      context: ./search-engine-go
+      dockerfile: Dockerfile
+    container_name: ghost-parking-search
+    restart: unless-stopped
+    ports:
+      - "${SEARCH_PORT:-8080}:8080"
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ghost_parking}?sslmode=disable
+      REDIS_URL: redis:6379
+      ENVIRONMENT: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ghost-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  ghost-network:
+    driver: bridge
