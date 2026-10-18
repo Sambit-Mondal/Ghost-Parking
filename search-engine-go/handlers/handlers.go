@@ -56,6 +56,66 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// NearbySpots handles GET /spots/nearby?latitude=...&longitude=... (5-mile radius search)
+func (h *Handler) NearbySpots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	query := r.URL.Query()
+	latStr := query.Get("latitude")
+	if latStr == "" {
+		latStr = query.Get("lat")
+	}
+
+	lngStr := query.Get("longitude")
+	if lngStr == "" {
+		lngStr = query.Get("lng")
+	}
+
+	if latStr == "" || lngStr == "" {
+		respondError(w, http.StatusBadRequest, "Missing required query parameters: 'latitude' and 'longitude'")
+		return
+	}
+
+	lat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil || lat < -90 || lat > 90 {
+		respondError(w, http.StatusBadRequest, "Invalid 'latitude' coordinate (must be between -90 and 90)")
+		return
+	}
+
+	lng, err := strconv.ParseFloat(lngStr, 64)
+	if err != nil || lng < -180 || lng > 180 {
+		respondError(w, http.StatusBadRequest, "Invalid 'longitude' coordinate (must be between -180 and 180)")
+		return
+	}
+
+	limit := 50
+	if lStr := query.Get("limit"); lStr != "" {
+		if lVal, err := strconv.Atoi(lStr); err == nil && lVal > 0 && lVal <= 100 {
+			limit = lVal
+		}
+	}
+
+	spots, err := h.DB.GetNearbySpots5Miles(lat, lng, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to retrieve nearby spots: "+err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"query": map[string]interface{}{
+			"latitude":     lat,
+			"longitude":    lng,
+			"radius_miles": 5.0,
+			"limit":        limit,
+		},
+		"count": len(spots),
+		"spots": spots,
+	})
+}
+
 // Search handles spatial radius queries: GET /search?lat=...&lng=...&radius=...&limit=...
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
