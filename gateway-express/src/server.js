@@ -7,6 +7,7 @@ const authRouter = require('./routes/auth');
 const bookingsRouter = require('./routes/bookings');
 const paymentsRouter = require('./routes/payments');
 const spotsRouter = require('./routes/spots');
+const spotsProxy = require('./proxy/spotsProxy');
 const prisma = require('./lib/prisma');
 const redis = require('./lib/redis');
 
@@ -62,6 +63,9 @@ app.use('/api/v1/bookings', bookingsRouter);
 app.use('/payments', paymentsRouter);
 app.use('/api/v1/payments', paymentsRouter);
 
+// Internal HTTP Proxy: Securely forward /api/spots mobile requests to Go Search Engine
+app.use('/api/spots', spotsProxy);
+
 app.use('/spots', spotsRouter);
 app.use('/api/v1/spots', spotsRouter);
 
@@ -69,13 +73,20 @@ app.use('/api/v1/spots', spotsRouter);
 app.get('/', (req, res) => {
   res.json({
     message: 'Welcome to Ghost Parking API Gateway',
-    version: '1.0.0',
+    version: '1.1.0',
     endpoints: {
       health: '/health',
       auth: ['/auth/register', '/auth/login', '/auth/me', '/auth/users'],
       bookings: ['/bookings (POST, GET)', '/bookings/:id', '/bookings/:id/status (PATCH)', '/bookings/:id/cancel (POST)'],
-      payments: ['/payments/order (POST)', '/payments/verify (POST)', '/payments/webhook (POST)', '/payments/booking/:id (GET)'],
-      spots: ['/spots (POST, GET)'],
+      payments: [
+        '/payments/pre-authorize (POST)',
+        '/payments/verify (POST)',
+        '/payments/checkout (POST)',
+        '/payments/webhook (POST)',
+        '/payments/booking/:id (GET)',
+      ],
+      spots_admin: ['/spots (POST, GET)'],
+      spots_search_proxy: ['/api/spots (GET)', '/api/spots/nearby (GET) -> forwards to Go service'],
     },
   });
 });
