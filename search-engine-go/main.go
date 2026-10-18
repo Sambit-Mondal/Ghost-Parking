@@ -68,15 +68,26 @@ func main() {
 
 	// Endpoints
 	mux.HandleFunc("/health", h.Health)
+	mux.HandleFunc("/spots/nearby", h.NearbySpots)
 	mux.HandleFunc("/search", h.Search)
 	mux.HandleFunc("/spots", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/spots/nearby" {
+			h.NearbySpots(w, r)
+			return
+		}
 		if r.URL.Path == "/spots" || r.URL.Path == "/spots/" {
 			h.ListSpots(w, r)
 		} else {
 			h.GetSpotByID(w, r)
 		}
 	})
-	mux.HandleFunc("/spots/", h.GetSpotByID)
+	mux.HandleFunc("/spots/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/spots/nearby" {
+			h.NearbySpots(w, r)
+			return
+		}
+		h.GetSpotByID(w, r)
+	})
 
 	// Root welcome endpoint
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -89,10 +100,11 @@ func main() {
 			"service": "search-engine-go",
 			"status":  "running",
 			"endpoints": map[string]string{
-				"health": "GET /health",
-				"search": "GET /search?lat=12.9716&lng=77.5946&radius=5000&limit=20",
-				"spots":  "GET /spots",
-				"spot":   "GET /spots/{id}",
+				"health":       "GET /health",
+				"spots_nearby": "GET /spots/nearby?latitude=12.9716&longitude=77.5946",
+				"search":       "GET /search?lat=12.9716&lng=77.5946&radius=5000&limit=20",
+				"spots":        "GET /spots",
+				"spot":         "GET /spots/{id}",
 			},
 		})
 	})
