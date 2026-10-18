@@ -265,6 +265,10 @@ func (db *DB) GetAllSpots(limit, offset int) ([]models.ParkingSpot, error) {
 		spots = append(spots, s)
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return spots, nil
 }
 
