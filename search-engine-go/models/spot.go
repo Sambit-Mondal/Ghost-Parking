@@ -170,6 +170,7 @@ type ParkingSpot struct {
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 	DistanceMeters *float64  `json:"distance_meters,omitempty" db:"distance_meters"`
+	DistanceMiles  *float64  `json:"distance_miles,omitempty" db:"distance_miles"`
 }
 
 // SearchParams contains query parameters for spatial search
