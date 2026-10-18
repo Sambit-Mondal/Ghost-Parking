@@ -17,10 +17,10 @@ Write-Host " -> Search Engine Go Status: $($searchHealth.status) (PostGIS: $($se
 Write-Host "`n[2/6] Registering Host User via Express..." -ForegroundColor Yellow
 $randomSuffix = Get-Random -Minimum 1000 -Maximum 9999
 $hostPayload = @{
-    name = "Host Partner $randomSuffix"
-    email = "host_$randomSuffix@example.com"
-    phone_number = "+9198765$randomSuffix"
-    role = "host"
+    name                = "Host Partner $randomSuffix"
+    email               = "host_$randomSuffix@example.com"
+    phone_number        = "+9198765$randomSuffix"
+    role                = "host"
     razorpay_account_id = "acc_$randomSuffix"
 } | ConvertTo-Json
 
@@ -31,13 +31,13 @@ Write-Host " -> Host Created with ID: $hostId" -ForegroundColor Green
 # 3. Create Parking Spot with PostGIS Coordinates
 Write-Host "`n[3/6] Creating Parking Spot (Bangalore MG Road: 12.9716, 77.5946)..." -ForegroundColor Yellow
 $spotPayload = @{
-    host_id = $hostId
-    title = "Prime Garage #$randomSuffix"
-    address = "$randomSuffix MG Road, Bangalore, Karnataka"
-    latitude = 12.9716
-    longitude = 77.5946
+    host_id     = $hostId
+    title       = "Prime Garage #$randomSuffix"
+    address     = "$randomSuffix MG Road, Bangalore, Karnataka"
+    latitude    = 12.9716
+    longitude   = 77.5946
     hourly_rate = 60.0
-    is_active = $true
+    is_active   = $true
 } | ConvertTo-Json
 
 $spotRes = Invoke-RestMethod -Uri "http://localhost:3000/spots" -Method Post -ContentType "application/json" -Body $spotPayload
@@ -51,27 +51,28 @@ Write-Host " -> Go Engine found $($searchRes.count) matching spots nearby!" -For
 $foundSpot = $searchRes.spots | Where-Object { $_.id -eq $spotId }
 if ($foundSpot) {
     Write-Host " -> Successfully matched Spot ID $spotId at distance $([math]::Round($foundSpot.distance_meters, 2)) meters" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host " -> Warning: Newly created spot not found in radius search." -ForegroundColor Red
 }
 
 # 5. Register Driver & Create Booking
 Write-Host "`n[5/6] Registering Driver & Creating Booking..." -ForegroundColor Yellow
 $driverPayload = @{
-    name = "Driver Bob $randomSuffix"
-    email = "driver_$randomSuffix@example.com"
+    name         = "Driver Bob $randomSuffix"
+    email        = "driver_$randomSuffix@example.com"
     phone_number = "+9191234$randomSuffix"
-    role = "driver"
+    role         = "driver"
 } | ConvertTo-Json
 
 $driverRes = Invoke-RestMethod -Uri "http://localhost:3000/auth/register" -Method Post -ContentType "application/json" -Body $driverPayload
 $driverId = $driverRes.user.id
 
 $bookingPayload = @{
-    driver_id = $driverId
-    spot_id = $spotId
-    start_time = (Get-Date).ToString("o")
-    end_time = (Get-Date).AddHours(3).ToString("o")
+    driver_id    = $driverId
+    spot_id      = $spotId
+    start_time   = (Get-Date).ToString("o")
+    end_time     = (Get-Date).AddHours(3).ToString("o")
     total_amount = 180.0
 } | ConvertTo-Json
 
@@ -86,10 +87,10 @@ $orderId = $orderRes.order.id
 Write-Host " -> Generated Order: $orderId" -ForegroundColor Green
 
 $verifyRes = Invoke-RestMethod -Uri "http://localhost:3000/payments/verify" -Method Post -ContentType "application/json" -Body (@{
-    booking_id = $bookingId
-    razorpay_order_id = $orderId
-    razorpay_payment_id = "pay_test_$randomSuffix"
-} | ConvertTo-Json)
+        booking_id          = $bookingId
+        razorpay_order_id   = $orderId
+        razorpay_payment_id = "pay_test_$randomSuffix"
+    } | ConvertTo-Json)
 
 Write-Host " -> Payment Verified! Booking Status is now: $($verifyRes.booking.status)" -ForegroundColor Green
 
