@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Ghost Parking",
+    "slug": "ghost-parking",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ghostparking.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0F19"
+      },
+      "package": "com.ghostparking.app"
+    }
+  }
+}
