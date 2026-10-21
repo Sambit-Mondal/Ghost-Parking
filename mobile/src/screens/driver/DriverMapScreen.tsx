@@ -14,6 +14,7 @@ import colors from '../../theme/colors';
 import { Header } from '../../components/common/Header';
 import { SpotCard, ParkingSpotData } from '../../components/driver/SpotCard';
 import { MapPlaceholder } from '../../components/driver/MapPlaceholder';
+import { DriverMapView } from '../../components/driver/DriverMapView';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { formatCurrency } from '../../utils/formatting';
@@ -109,10 +110,14 @@ export const DriverMapScreen: React.FC = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
     }
-    timerRef.current = setTimeout(() => {
+    const timer = setTimeout(() => {
       setBookingModalVisible(false);
       setBookingConfirmed(false);
     }, 1800);
+    if (typeof (timer as any).unref === 'function') {
+      (timer as any).unref();
+    }
+    timerRef.current = timer;
   };
 
   return (
@@ -198,6 +203,19 @@ export const DriverMapScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
         </ScrollView>
+
+        {/* Interactive Map View with Custom Spot Markers */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Interactive Map</Text>
+          <Badge label="Custom Markers" variant="driver" />
+        </View>
+
+        <DriverMapView
+          testID="driver-native-map"
+          spots={filteredSpots}
+          selectedSpotId={selectedSpot?.id}
+          onSelectSpot={(spot) => setSelectedSpot(spot)}
+        />
 
         {/* PostGIS Radar Map */}
         <View style={styles.sectionHeader}>
