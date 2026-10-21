@@ -77,7 +77,7 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/health',
       auth: ['/auth/register', '/auth/login', '/auth/me', '/auth/users'],
-      bookings: ['/bookings (POST, GET)', '/bookings/:id', '/bookings/:id/status (PATCH)', '/bookings/:id/cancel (POST)'],
+      bookings: ['/bookings (POST, GET)', '/bookings/:id', '/bookings/:id/status (PATCH)', '/bookings/:id/cancel (POST)', '/bookings/check-in (POST)'],
       payments: [
         '/payments/pre-authorize (POST)',
         '/payments/verify (POST)',
