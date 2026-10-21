@@ -12,24 +12,24 @@ describe('Component Test: DriverMapScreen', () => {
     );
 
   it('renders search input, filter pills, radar map, and spot list', () => {
-    const { getByTestId, getByText } = renderScreen();
+    const { getByTestId, getAllByText } = renderScreen();
 
     expect(getByTestId('driver-search-input')).toBeTruthy();
     expect(getByTestId('filter-all')).toBeTruthy();
     expect(getByTestId('filter-affordable')).toBeTruthy();
     expect(getByTestId('filter-nearby')).toBeTruthy();
     expect(getByTestId('driver-map-placeholder')).toBeTruthy();
-    expect(getByText('MG Road Metro Hub Parking')).toBeTruthy();
-    expect(getByText('Indiranagar 100ft Rd Garage')).toBeTruthy();
+    expect(getAllByText('MG Road Metro Hub Parking').length).toBeGreaterThan(0);
+    expect(getAllByText('Indiranagar 100ft Rd Garage').length).toBeGreaterThan(0);
   });
 
   it('filters spots by text search', () => {
-    const { getByTestId, getByText, queryByText } = renderScreen();
+    const { getByTestId, getAllByText, queryByText } = renderScreen();
     const searchInput = getByTestId('driver-search-input');
 
     fireEvent.changeText(searchInput, 'Indiranagar');
 
-    expect(getByText('Indiranagar 100ft Rd Garage')).toBeTruthy();
+    expect(getAllByText('Indiranagar 100ft Rd Garage').length).toBeGreaterThan(0);
     expect(queryByText('Koramangala Tech Park Bay')).toBeNull();
   });
 
