@@ -19,6 +19,8 @@ jest.mock('react-native-safe-area-context', () => {
   };
 });
 
+
+
 // Synchronous Animated mock to prevent background timers and act(...) warnings
 const createMockAnimation = (value, config) => ({
   start: (callback) => {
