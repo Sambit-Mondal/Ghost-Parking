@@ -7,13 +7,28 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ghostparking.app"
+      "bundleIdentifier": "com.ghostparking.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Ghost Parking needs your location to verify you have arrived at your reserved parking spot."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#0B0F19"
       },
-      "package": "com.ghostparking.app"
-    }
+      "package": "com.ghostparking.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Ghost Parking needs your location to verify you have arrived at your reserved parking spot."
+        }
+      ]
+    ]
   }
 }
