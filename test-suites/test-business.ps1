@@ -134,6 +134,19 @@ $verifyRes = Invoke-RestMethod -Uri "http://localhost:3000/payments/verify" -Met
 Write-Host " -> Payment Authorized. Booking Status is now: $($verifyRes.booking.status)" -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
+# 7b. Test Driver Check-In endpoint: POST /bookings/check-in (GPS <50m Arrival)
+# -----------------------------------------------------------------------------
+Write-Host "`n[7b/8] Testing Driver Check-In endpoint: POST /bookings/check-in..." -ForegroundColor Yellow
+$checkInPayload = @{
+    booking_id      = $bookingId
+    latitude        = 12.9717
+    longitude       = 77.5947
+    distance_meters = 15
+} | ConvertTo-Json
+$checkInRes = Invoke-RestMethod -Uri "http://localhost:3000/bookings/check-in" -Method Post -ContentType "application/json" -Body $checkInPayload
+Write-Host " -> Check-In Verified ($($checkInRes.distance_meters)m away). Status: $($checkInRes.booking.status)" -ForegroundColor Green
+
+# -----------------------------------------------------------------------------
 # 8. Test Checkout & Webhook Payment Split (Razorpay Route: 80% Host / 20% Platform)
 # -----------------------------------------------------------------------------
 Write-Host "`n[8/8] Testing Razorpay Route Split upon Checkout (80% Host, 20% Platform)..." -ForegroundColor Yellow
