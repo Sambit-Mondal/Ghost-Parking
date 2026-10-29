@@ -23,7 +23,7 @@ export const ProfileScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
       <Header title="Account Profile" subtitle="Settings & Persona Mode" showPersonaToggle={false} />
 
       <ScrollView
