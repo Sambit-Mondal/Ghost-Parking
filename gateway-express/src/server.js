@@ -14,8 +14,29 @@ const redis = require('./lib/redis');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// Robust CORS configuration supporting mobile apps, dev servers, and web clients
+const corsOptions = {
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Accept',
+    'Origin',
+    'X-Requested-With',
+    'x-client',
+    'x-gateway-source',
+    'x-forwarded-host',
+    'x-forwarded-for',
+    'x-forwarded-proto',
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  credentials: true,
+  maxAge: 86400,
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('combined'));
