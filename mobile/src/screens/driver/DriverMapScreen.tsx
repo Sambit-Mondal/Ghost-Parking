@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   TouchableOpacity,
   Modal,
   StatusBar,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import colors from '../../theme/colors';
@@ -18,6 +20,7 @@ import { DriverMapView } from '../../components/driver/DriverMapView';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { formatCurrency } from '../../utils/formatting';
+import { fetchNearbySpots } from '../../services/spotService';
 
 export const INITIAL_SPOTS: ParkingSpotData[] = [
   {
@@ -71,14 +74,78 @@ export const INITIAL_SPOTS: ParkingSpotData[] = [
 ];
 
 export const DriverMapScreen: React.FC = () => {
+  const [spots, setSpots] = useState<ParkingSpotData[]>(INITIAL_SPOTS);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'affordable' | 'nearby'>('all');
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpotData | null>(INITIAL_SPOTS[0]);
   const [bookingModalVisible, setBookingModalVisible] = useState(false);
   const [bookingHours, setBookingHours] = useState(2);
   const [bookingConfirmed, setBookingConfirmed] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [dataSource, setDataSource] = useState<string>('Go PostGIS Engine');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const filteredSpots = INITIAL_SPOTS.filter((spot) => {
+  const isMountedRef = useRef(true);
+
+  const loadSpots = useCallback(async (isPullToRefresh = false) => {
+    if (isPullToRefresh) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
+    setErrorMessage(null);
+
+    try {
+      const res = await fetchNearbySpots({
+        latitude: 12.9716,
+        longitude: 77.5946,
+        limit: 50,
+      });
+
+      if (!isMountedRef.current) return;
+
+      if (res.success && res.spots && res.spots.length > 0) {
+        setSpots(res.spots);
+        if (!selectedSpot || !res.spots.some((s) => s.id === selectedSpot.id)) {
+          setSelectedSpot(res.spots[0]);
+        }
+        setDataSource(
+          res.source === 'go_search_engine'
+            ? 'Go PostGIS Engine'
+            : res.source === 'express_direct'
+            ? 'Express Gateway'
+            : 'Cached Fallback'
+        );
+      } else if (res.error) {
+        setErrorMessage(res.error);
+      }
+    } catch (err: any) {
+      if (isMountedRef.current) {
+        setErrorMessage(err.message || 'Unable to fetch spots');
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    }
+  }, [selectedSpot]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    if (process.env.NODE_ENV !== 'test') {
+      loadSpots(false);
+    }
+    return () => {
+      isMountedRef.current = false;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  const filteredSpots = spots.filter((spot) => {
     const matchesSearch =
       spot.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       spot.address.toLowerCase().includes(searchQuery.toLowerCase());
@@ -122,13 +189,21 @@ export const DriverMapScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
       <Header />
 
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => loadSpots(true)}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         {/* Search Bar */}
         <View style={styles.searchWrapper}>
@@ -146,6 +221,35 @@ export const DriverMapScreen: React.FC = () => {
               <Text style={styles.clearSearch}>✕</Text>
             </TouchableOpacity>
           )}
+        </View>
+
+        {/* Live Backend Gateway Connection Status */}
+        <View style={styles.statusBarWrapper} testID="gateway-status-bar">
+          <View style={styles.statusBarLeft}>
+            <View
+              style={[
+                styles.statusDot,
+                errorMessage ? styles.statusDotWarn : styles.statusDotActive,
+              ]}
+            />
+            <Text style={styles.statusText} numberOfLines={1}>
+              {errorMessage
+                ? 'Offline Cache Active'
+                : `Connected: ${dataSource} (:3000)`}
+            </Text>
+          </View>
+          <TouchableOpacity
+            testID="refresh-spots-btn"
+            onPress={() => loadSpots(false)}
+            disabled={isLoading || isRefreshing}
+            style={styles.refreshBtn}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color={colors.accent} testID="spots-loading-spinner" />
+            ) : (
+              <Text style={styles.refreshBtnText}>↻ Refresh</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Filter Pills */}
@@ -166,7 +270,7 @@ export const DriverMapScreen: React.FC = () => {
                 selectedFilter === 'all' && styles.filterPillTextActive,
               ]}
             >
-              All Spots ({INITIAL_SPOTS.length})
+              All Spots ({spots.length})
             </Text>
           </TouchableOpacity>
 
@@ -609,5 +713,52 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     paddingHorizontal: 20,
+  },
+  statusBarWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(30, 41, 59, 0.7)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  statusBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusDotActive: {
+    backgroundColor: '#10B981',
+  },
+  statusDotWarn: {
+    backgroundColor: '#F59E0B',
+  },
+  statusText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  refreshBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  refreshBtnText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
