@@ -16,6 +16,7 @@ export const colors = {
   primary: '#06B6D4', // Ghost Cyan
   primaryGlow: 'rgba(6, 182, 212, 0.25)',
   secondary: '#3B82F6', // Electric Blue
+  accent: '#06B6D4', // Ghost Cyan Accent
   indigo: '#6366F1',
 
   // Semantic Status
