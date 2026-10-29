@@ -25,7 +25,7 @@ jest.mock('react-native-safe-area-context', () => {
 const createMockAnimation = (value, config) => ({
   start: (callback) => {
     if (value && config && config.toValue !== undefined) {
-      if (typeof value.setValue === 'function') {
+      if (typeof value.setValue === 'function' && value._value !== config.toValue) {
         value.setValue(config.toValue);
       }
     }
