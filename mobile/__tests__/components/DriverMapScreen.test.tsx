@@ -73,4 +73,10 @@ describe('Component Test: DriverMapScreen', () => {
       expect(getByText('Reservation Locked!')).toBeTruthy();
     });
   });
+
+  it('renders the live gateway connection status bar and refresh button', () => {
+    const { getByTestId } = renderScreen();
+    expect(getByTestId('gateway-status-bar')).toBeTruthy();
+    expect(getByTestId('refresh-spots-btn')).toBeTruthy();
+  });
 });
