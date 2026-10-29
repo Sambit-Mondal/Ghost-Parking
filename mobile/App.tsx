@@ -1,9 +1,15 @@
 import React from 'react';
+import { LogBox } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from './src/context/AuthContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import './global.css';
+
+// Silence third-party CSS interop deprecation warning
+LogBox.ignoreLogs([
+  'ImageBackground is deprecated',
+]);
 
 export default function App() {
   return (
