@@ -69,7 +69,7 @@ export const HostReservationsScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
       <Header title="Driver Bookings" subtitle="Live occupant activity and payouts" />
 
       <ScrollView
