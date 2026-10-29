@@ -173,19 +173,10 @@ export const DriverMapView: React.FC<DriverMapViewProps> = ({
               }}
               title={spot.title}
               description={`${formatCurrency(spot.hourly_rate)}/hr • ${spot.available_slots ?? 1} slots left`}
+              pinColor={isSelected ? '#00F5FF' : '#3B82F6'}
+              tracksViewChanges={false}
               onPress={() => onSelectSpot(spot)}
-            >
-              {/* Custom Cyber Marker Pin - Single child to satisfy Android Fabric mount queue */}
-              <View style={[styles.markerContainer, isSelected && styles.markerSelected]}>
-                <View style={[styles.markerPill, isSelected && styles.markerPillSelected]}>
-                  <Text style={styles.markerIcon}>🅿️</Text>
-                  <Text style={[styles.markerPrice, isSelected && styles.markerPriceSelected]}>
-                    {formatCurrency(spot.hourly_rate)}/h
-                  </Text>
-                </View>
-                <View style={[styles.markerArrow, isSelected && styles.markerArrowSelected]} />
-              </View>
-            </Marker>
+            />
           );
         })}
       </MapView>
