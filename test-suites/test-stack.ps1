@@ -44,16 +44,16 @@ $spotRes = Invoke-RestMethod -Uri "http://localhost:3000/spots" -Method Post -Co
 $spotId = $spotRes.spot.id
 Write-Host " -> Spot Created with ID: $spotId" -ForegroundColor Green
 
-# 4. Query Go Search Engine for Nearby Spots (PostGIS Radius Search)
-Write-Host "`n[4/6] Querying Go Search Engine within 2km radius (PostGIS GIST Index)..." -ForegroundColor Yellow
-$searchRes = Invoke-RestMethod -Uri "http://localhost:8080/search?lat=12.9720&lng=77.5950&radius=2000"
-Write-Host " -> Go Engine found $($searchRes.count) matching spots nearby!" -ForegroundColor Green
-$foundSpot = $searchRes.spots | Where-Object { $_.id -eq $spotId }
+# 4. Query Nearby Spots via Express Gateway Proxy (Forwarding to Go Search Engine)
+Write-Host "`n[4/6] Querying Express Proxy GET /api/spots/nearby (Single Entry Point -> Go PostGIS)..." -ForegroundColor Yellow
+$proxyRes = Invoke-RestMethod -Uri "http://localhost:3000/api/spots/nearby?latitude=12.9716&longitude=77.5946"
+Write-Host " -> Express Proxy returned $($proxyRes.count) matching spots via Go engine!" -ForegroundColor Green
+$foundSpot = $proxyRes.spots | Where-Object { $_.id -eq $spotId }
 if ($foundSpot) {
-    Write-Host " -> Successfully matched Spot ID $spotId at distance $([math]::Round($foundSpot.distance_meters, 2)) meters" -ForegroundColor Green
+    Write-Host " -> Successfully matched Spot ID $spotId via Express Gateway!" -ForegroundColor Green
 }
 else {
-    Write-Host " -> Warning: Newly created spot not found in radius search." -ForegroundColor Red
+    Write-Host " -> Warning: Newly created spot not found in nearby search." -ForegroundColor Red
 }
 
 # 5. Register Driver & Create Booking
