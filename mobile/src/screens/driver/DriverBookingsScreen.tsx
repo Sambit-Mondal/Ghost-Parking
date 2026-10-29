@@ -246,7 +246,7 @@ export const DriverBookingsScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" />
       <Header title="My Reservations" subtitle="Active and past parking sessions" />
 
       <ScrollView
