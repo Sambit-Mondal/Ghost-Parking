@@ -1,10 +1,11 @@
 import React from 'react';
-import { Text, Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
 import { HostTabParamList } from './types';
 import { HostListingsScreen } from '../screens/host/HostListingsScreen';
 import { HostReservationsScreen } from '../screens/host/HostReservationsScreen';
-import { ProfileScreen } from '../screens/profile/ProfileScreen';
+import { HostProfileScreen } from '../screens/profile/HostProfileScreen';
 import colors from '../theme/colors';
 
 const Tab = createBottomTabNavigator<HostTabParamList>();
@@ -25,8 +26,8 @@ export const HostNavigator: React.FC = () => {
         component={HostListingsScreen}
         options={{
           tabBarLabel: 'My Listings',
-          tabBarIcon: ({ color, focused }) => (
-            <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>🏠</Text>
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="business-outline" size={size || 20} color={color} />
           ),
         }}
       />
@@ -35,18 +36,18 @@ export const HostNavigator: React.FC = () => {
         component={HostReservationsScreen}
         options={{
           tabBarLabel: 'Driver Bookings',
-          tabBarIcon: ({ color, focused }) => (
-            <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>📊</Text>
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="stats-chart-outline" size={size || 20} color={color} />
           ),
         }}
       />
       <Tab.Screen
         name="HostProfile"
-        component={ProfileScreen}
+        component={HostProfileScreen}
         options={{
           tabBarLabel: 'Profile',
-          tabBarIcon: ({ color, focused }) => (
-            <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>👤</Text>
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" size={size || 20} color={color} />
           ),
         }}
       />
@@ -67,13 +68,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     marginTop: 2,
-  },
-  tabIcon: {
-    fontSize: 20,
-    opacity: 0.6,
-  },
-  tabIconActive: {
-    opacity: 1,
-    transform: [{ scale: 1.15 }],
+    letterSpacing: 0.3,
   },
 });
