@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
+import { Ionicons } from '@expo/vector-icons';
 import colors from '../../theme/colors';
 import { Header } from '../../components/common/Header';
 import { Badge } from '../../components/common/Badge';
@@ -328,7 +329,7 @@ export const DriverBookingsScreen: React.FC = () => {
               <View style={styles.timingRow}>
                 <Text style={styles.timingLabel}>Time Window:</Text>
                 <Text style={styles.timingValue}>
-                  {booking.startTime} ➔ {booking.endTime}
+                  {booking.startTime} - {booking.endTime}
                 </Text>
               </View>
 
@@ -351,7 +352,6 @@ export const DriverBookingsScreen: React.FC = () => {
                         : styles.feedbackTextSuccess,
                     ]}
                   >
-                    {statusRecord.type === 'error' ? '⚠️ ' : '✅ '}
                     {statusRecord.message}
                   </Text>
                 </View>
@@ -361,11 +361,11 @@ export const DriverBookingsScreen: React.FC = () => {
               {booking.checkedIn && (
                 <View style={styles.checkedInRow}>
                   <Text style={styles.checkedInBadge}>
-                    ● Session Active (Checked-in at {booking.checkedInAt || 'Verified'})
+                    Session Active (Checked-in at {booking.checkedInAt || 'Verified'})
                   </Text>
                   {booking.distanceAtCheckIn !== undefined && (
                     <Text style={styles.checkedInDistance}>
-                      🎯 {booking.distanceAtCheckIn}m from bay
+                      {booking.distanceAtCheckIn}m from bay
                     </Text>
                   )}
                 </View>
@@ -375,7 +375,7 @@ export const DriverBookingsScreen: React.FC = () => {
               <View style={styles.actionContainer}>
                 <View style={styles.escrowRow}>
                   <Text style={styles.escrowBadge}>
-                    {booking.escrowStatus === 'held' ? '🔒 Escrow Held' : '✓ Escrow Settled'}
+                    {booking.escrowStatus === 'held' ? 'Escrow Held' : 'Escrow Settled'}
                   </Text>
                 </View>
 
@@ -395,7 +395,7 @@ export const DriverBookingsScreen: React.FC = () => {
                           <Text style={styles.arrivedBtnText}>{'Verifying GPS (<50m)...'}</Text>
                         </View>
                       ) : (
-                        <Text style={styles.arrivedBtnText}>📍 I have arrived (Check In)</Text>
+                        <Text style={styles.arrivedBtnText}>I have arrived (Check In)</Text>
                       )}
                     </TouchableOpacity>
 
@@ -431,7 +431,7 @@ export const DriverBookingsScreen: React.FC = () => {
 
         {filteredBookings.length === 0 && (
           <View style={styles.emptyView}>
-            <Text style={styles.emptyIcon}>📋</Text>
+            <Ionicons name="receipt-outline" size={40} color={colors.textMuted} style={{ marginBottom: 12 }} />
             <Text style={styles.emptyTitle}>No reservations found</Text>
             <Text style={styles.emptySubtitle}>You have no parking sessions in this view.</Text>
           </View>
