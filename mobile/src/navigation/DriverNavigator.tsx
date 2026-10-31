@@ -1,10 +1,11 @@
 import React from 'react';
-import { Text, Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
 import { DriverTabParamList } from './types';
 import { DriverMapScreen } from '../screens/driver/DriverMapScreen';
 import { DriverBookingsScreen } from '../screens/driver/DriverBookingsScreen';
-import { ProfileScreen } from '../screens/profile/ProfileScreen';
+import { DriverProfileScreen } from '../screens/profile/DriverProfileScreen';
 import colors from '../theme/colors';
 
 const Tab = createBottomTabNavigator<DriverTabParamList>();
@@ -25,8 +26,8 @@ export const DriverNavigator: React.FC = () => {
         component={DriverMapScreen}
         options={{
           tabBarLabel: 'Find Spot',
-          tabBarIcon: ({ color, focused }) => (
-            <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>🧭</Text>
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="map-outline" size={size || 20} color={color} />
           ),
         }}
       />
@@ -35,18 +36,18 @@ export const DriverNavigator: React.FC = () => {
         component={DriverBookingsScreen}
         options={{
           tabBarLabel: 'Reservations',
-          tabBarIcon: ({ color, focused }) => (
-            <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>📋</Text>
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="receipt-outline" size={size || 20} color={color} />
           ),
         }}
       />
       <Tab.Screen
         name="DriverProfile"
-        component={ProfileScreen}
+        component={DriverProfileScreen}
         options={{
           tabBarLabel: 'Profile',
-          tabBarIcon: ({ color, focused }) => (
-            <Text style={[styles.tabIcon, focused && styles.tabIconActive]}>👤</Text>
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" size={size || 20} color={color} />
           ),
         }}
       />
@@ -67,13 +68,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     marginTop: 2,
-  },
-  tabIcon: {
-    fontSize: 20,
-    opacity: 0.6,
-  },
-  tabIconActive: {
-    opacity: 1,
-    transform: [{ scale: 1.15 }],
+    letterSpacing: 0.3,
   },
 });
