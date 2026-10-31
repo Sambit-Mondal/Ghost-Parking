@@ -12,6 +12,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
+import { Ionicons } from '@expo/vector-icons';
 import colors from '../../theme/colors';
 import { Header } from '../../components/common/Header';
 import { SpotCard, ParkingSpotData } from '../../components/driver/SpotCard';
@@ -21,10 +23,16 @@ import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { formatCurrency } from '../../utils/formatting';
 import { fetchNearbySpots } from '../../services/spotService';
+import {
+  createPaymentOrder,
+  openRazorpayCheckout,
+  verifyPayment,
+} from '../../services/paymentService';
+import { useAuth } from '../../context/AuthContext';
 
 export const INITIAL_SPOTS: ParkingSpotData[] = [
   {
-    id: 'spot-101',
+    id: '4a038134-d6f6-4cff-8e93-a031dc49c32a',
     title: 'MG Road Metro Hub Parking',
     address: 'Near Trinity Metro Station, MG Road, Bengaluru',
     latitude: 12.9716,
@@ -36,7 +44,7 @@ export const INITIAL_SPOTS: ParkingSpotData[] = [
     available_slots: 3,
   },
   {
-    id: 'spot-102',
+    id: 'f9b43626-4957-477c-b1b0-84700120bdf2',
     title: 'Indiranagar 100ft Rd Garage',
     address: '12th Main Rd, HAL 2nd Stage, Indiranagar',
     latitude: 12.9784,
@@ -48,7 +56,7 @@ export const INITIAL_SPOTS: ParkingSpotData[] = [
     available_slots: 1,
   },
   {
-    id: 'spot-103',
+    id: 'aa074775-207e-473c-9d70-b61396f6abb4',
     title: 'Koramangala Tech Park Bay',
     address: '4th Block, 80 Feet Rd, Koramangala',
     latitude: 12.9352,
@@ -60,7 +68,7 @@ export const INITIAL_SPOTS: ParkingSpotData[] = [
     available_slots: 5,
   },
   {
-    id: 'spot-104',
+    id: '7cae0f87-775d-49aa-bb38-afbbbd6d0c32',
     title: 'Church Street Underground Bay',
     address: 'Church St, Shanthala Nagar, Ashok Nagar',
     latitude: 12.9753,
@@ -74,13 +82,26 @@ export const INITIAL_SPOTS: ParkingSpotData[] = [
 ];
 
 export const DriverMapScreen: React.FC = () => {
+  const { user, userToken } = useAuth();
+
   const [spots, setSpots] = useState<ParkingSpotData[]>(INITIAL_SPOTS);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'affordable' | 'nearby'>('all');
   const [selectedSpot, setSelectedSpot] = useState<ParkingSpotData | null>(INITIAL_SPOTS[0]);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  const handleSelectSpot = useCallback((spot: ParkingSpotData) => {
+    setSelectedSpot(spot);
+  }, []);
+
+  // Booking and Razorpay payment states
   const [bookingModalVisible, setBookingModalVisible] = useState(false);
   const [bookingHours, setBookingHours] = useState(2);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [bookingConfirmed, setBookingConfirmed] = useState(false);
+  const [activePaymentRecord, setActivePaymentRecord] = useState<any>(null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dataSource, setDataSource] = useState<string>('Go PostGIS Engine');
@@ -88,60 +109,92 @@ export const DriverMapScreen: React.FC = () => {
 
   const isMountedRef = useRef(true);
 
-  const loadSpots = useCallback(async (isPullToRefresh = false) => {
-    if (isPullToRefresh) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-    setErrorMessage(null);
+  const loadSpots = useCallback(
+    async (isPullToRefresh = false, coords?: { latitude: number; longitude: number }) => {
+      if (isPullToRefresh) {
+        setIsRefreshing(true);
+      } else {
+        setIsLoading(true);
+      }
+      setErrorMessage(null);
 
-    try {
-      const res = await fetchNearbySpots({
-        latitude: 12.9716,
-        longitude: 77.5946,
-        limit: 50,
-      });
+      const lat = coords?.latitude || userLocation?.latitude || 12.9716;
+      const lng = coords?.longitude || userLocation?.longitude || 77.5946;
 
-      if (!isMountedRef.current) return;
+      try {
+        const res = await fetchNearbySpots({
+          latitude: lat,
+          longitude: lng,
+          limit: 50,
+        });
 
-      if (res.success && res.spots && res.spots.length > 0) {
-        setSpots(res.spots);
-        if (!selectedSpot || !res.spots.some((s) => s.id === selectedSpot.id)) {
-          setSelectedSpot(res.spots[0]);
+        if (!isMountedRef.current) return;
+
+        if (res.success && res.spots && res.spots.length > 0) {
+          setSpots(res.spots);
+          if (!selectedSpot || !res.spots.some((s) => s.id === selectedSpot.id)) {
+            setSelectedSpot(res.spots[0]);
+          }
+          setDataSource(
+            res.source === 'go_search_engine'
+              ? 'Go PostGIS Engine'
+              : res.source === 'express_direct'
+              ? 'Express Gateway'
+              : 'Cached Fallback'
+          );
+        } else if (res.error) {
+          setErrorMessage(res.error);
         }
-        setDataSource(
-          res.source === 'go_search_engine'
-            ? 'Go PostGIS Engine'
-            : res.source === 'express_direct'
-            ? 'Express Gateway'
-            : 'Cached Fallback'
-        );
-      } else if (res.error) {
-        setErrorMessage(res.error);
+      } catch (err: any) {
+        if (isMountedRef.current) {
+          setErrorMessage(err.message || 'Unable to fetch spots');
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
       }
-    } catch (err: any) {
-      if (isMountedRef.current) {
-        setErrorMessage(err.message || 'Unable to fetch spots');
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsLoading(false);
-        setIsRefreshing(false);
-      }
-    }
-  }, [selectedSpot]);
+    },
+    [selectedSpot, userLocation]
+  );
 
   useEffect(() => {
     isMountedRef.current = true;
+
+    const initGPS = async () => {
+      let coords = { latitude: 12.9716, longitude: 77.5946 };
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          if (loc?.coords) {
+            coords = {
+              latitude: loc.coords.latitude,
+              longitude: loc.coords.longitude,
+            };
+            if (isMountedRef.current) {
+              setUserLocation(coords);
+            }
+          }
+        }
+      } catch {
+        // Fallback to default coordinates
+      }
+
+      if (process.env.NODE_ENV !== 'test') {
+        loadSpots(false, coords);
+      }
+    };
+
     if (process.env.NODE_ENV !== 'test') {
-      loadSpots(false);
+      initGPS();
     }
+
     return () => {
       isMountedRef.current = false;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
     };
   }, []);
 
@@ -156,35 +209,94 @@ export const DriverMapScreen: React.FC = () => {
     return true;
   });
 
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
   const handleBookPress = (spot: ParkingSpotData) => {
     setSelectedSpot(spot);
     setBookingConfirmed(false);
+    setPaymentError(null);
     setBookingModalVisible(true);
   };
 
-  const handleConfirmBooking = () => {
-    setBookingConfirmed(true);
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
+  /**
+   * Real Razorpay Checkout Lifecycle:
+   * 1. POST /payments/create-order on Express Gateway to generate order_id
+   * 2. react-native-razorpay native modal checkout
+   * 3. POST /payments/verify with signature verification to transition booking status to 'active'
+   */
+  const handleConfirmBooking = async () => {
+    if (!selectedSpot) return;
+
+    setIsProcessingPayment(true);
+    setPaymentError(null);
+
+    const totalAmount = (selectedSpot.hourly_rate ?? 80) * bookingHours;
+
+    try {
+      const driverId =
+        user?.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id)
+          ? user.id
+          : '9b0ca6fe-3168-4ffd-b420-394126be9f5e';
+
+      // 1. Request Order Creation from Express Gateway
+      const orderRes = await createPaymentOrder(
+        {
+          spot_id: selectedSpot.id,
+          driver_id: driverId,
+          amount: totalAmount,
+          hours: bookingHours,
+        },
+        userToken
+      );
+
+      if (!orderRes.success || !orderRes.order_id) {
+        throw new Error(orderRes.error || 'Failed to initialize payment order');
+      }
+
+      // 2. Open Native Razorpay Checkout Modal
+      const checkoutResult = await openRazorpayCheckout({
+        key: orderRes.key_id || 'rzp_test_placeholder',
+        amount: orderRes.amount || totalAmount * 100,
+        currency: 'INR',
+        name: 'Ghost Parking',
+        description: `Reserve: ${selectedSpot.title} (${bookingHours} hrs)`,
+        order_id: orderRes.order_id,
+        prefill: {
+          email: user?.email || 'driver@ghostparking.com',
+          contact: user?.phone || '+91 98765 43210',
+          name: user?.name || 'Verified Driver',
+        },
+        theme: { color: colors.primary },
+      });
+
+      // 3. Verify Payment Callback with Express Gateway
+      const verifyRes = await verifyPayment(
+        {
+          booking_id: orderRes.booking_id || `bk_${Date.now()}`,
+          razorpay_order_id: checkoutResult.razorpay_order_id,
+          razorpay_payment_id: checkoutResult.razorpay_payment_id,
+          razorpay_signature: checkoutResult.razorpay_signature,
+        },
+        userToken
+      );
+
+      if (!verifyRes.success) {
+        throw new Error(verifyRes.error || 'Payment verification failed');
+      }
+
+      // 4. Update confirmed booking state upon verified active status
+      setActivePaymentRecord({
+        bookingId: orderRes.booking_id,
+        paymentId: checkoutResult.razorpay_payment_id,
+        orderId: checkoutResult.razorpay_order_id,
+        hours: bookingHours,
+        amount: totalAmount,
+        spot: selectedSpot,
+      });
+      setBookingConfirmed(true);
+    } catch (err: any) {
+      setPaymentError(err.message || 'Payment processing was cancelled or failed.');
+    } finally {
+      setIsProcessingPayment(false);
     }
-    const timer = setTimeout(() => {
-      setBookingModalVisible(false);
-      setBookingConfirmed(false);
-    }, 1800);
-    if (typeof (timer as any).unref === 'function') {
-      (timer as any).unref();
-    }
-    timerRef.current = timer;
   };
 
   return (
@@ -207,7 +319,7 @@ export const DriverMapScreen: React.FC = () => {
       >
         {/* Search Bar */}
         <View style={styles.searchWrapper}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Ionicons name="search-outline" size={18} color={colors.textMuted} style={styles.searchIcon} />
           <TextInput
             testID="driver-search-input"
             style={styles.searchInput}
@@ -218,7 +330,7 @@ export const DriverMapScreen: React.FC = () => {
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Text style={styles.clearSearch}>✕</Text>
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
@@ -247,7 +359,7 @@ export const DriverMapScreen: React.FC = () => {
             {isLoading ? (
               <ActivityIndicator size="small" color={colors.accent} testID="spots-loading-spinner" />
             ) : (
-              <Text style={styles.refreshBtnText}>↻ Refresh</Text>
+              <Text style={styles.refreshBtnText}>Refresh</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -308,17 +420,18 @@ export const DriverMapScreen: React.FC = () => {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Interactive Map View with Custom Spot Markers */}
+        {/* Interactive Map View */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Interactive Map</Text>
-          <Badge label="Custom Markers" variant="driver" />
+          <Badge label="Standard Pins" variant="driver" />
         </View>
 
         <DriverMapView
           testID="driver-native-map"
           spots={filteredSpots}
           selectedSpotId={selectedSpot?.id}
-          onSelectSpot={(spot) => setSelectedSpot(spot)}
+          onSelectSpot={handleSelectSpot}
+          userLocation={userLocation}
         />
 
         {/* PostGIS Radar Map */}
@@ -331,7 +444,7 @@ export const DriverMapScreen: React.FC = () => {
           testID="driver-map-placeholder"
           spots={filteredSpots}
           selectedSpotId={selectedSpot?.id}
-          onSelectSpot={(spot) => setSelectedSpot(spot)}
+          onSelectSpot={handleSelectSpot}
         />
 
         {/* Available Spots List */}
@@ -346,14 +459,14 @@ export const DriverMapScreen: React.FC = () => {
             testID={`spot-card-${spot.id}`}
             spot={spot}
             selected={selectedSpot?.id === spot.id}
-            onPress={() => setSelectedSpot(spot)}
+            onPress={() => handleSelectSpot(spot)}
             onBookPress={() => handleBookPress(spot)}
           />
         ))}
 
         {filteredSpots.length === 0 && (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📍</Text>
+            <Ionicons name="location-outline" size={40} color={colors.textMuted} style={styles.emptyIcon} />
             <Text style={styles.emptyTitle}>No Parking Spots Found</Text>
             <Text style={styles.emptySubtitle}>
               Try adjusting your search terms or expanding your filter range.
@@ -362,23 +475,45 @@ export const DriverMapScreen: React.FC = () => {
         )}
       </ScrollView>
 
-      {/* Booking Bottom Sheet / Modal */}
+      {/* Booking Bottom Sheet / Razorpay Modal */}
       <Modal
         visible={bookingModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setBookingModalVisible(false)}
+        onRequestClose={() => {
+          if (!isProcessingPayment) {
+            setBookingModalVisible(false);
+          }
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent} testID="booking-modal">
             {bookingConfirmed ? (
               <View style={styles.confirmationView} testID="booking-confirmation-view">
-                <Text style={styles.confirmIcon}>✅</Text>
+                <Ionicons name="checkmark-circle-outline" size={54} color={colors.success} style={styles.confirmIcon} />
                 <Text style={styles.confirmTitle}>Reservation Locked!</Text>
                 <Text style={styles.confirmSubtitle}>
-                  ₹{(selectedSpot?.hourly_rate ?? 0) * bookingHours} held in Razorpay Escrow.
+                  {formatCurrency((selectedSpot?.hourly_rate ?? 0) * bookingHours)} held in Razorpay Escrow.
                   Your spot is reserved for {bookingHours} hours.
                 </Text>
+
+                {activePaymentRecord && (
+                  <View style={styles.paymentSummaryCard}>
+                    <Text style={styles.paymentSummaryLabel}>Payment Reference</Text>
+                    <Text style={styles.paymentSummaryValue}>{activePaymentRecord.paymentId}</Text>
+                    <Text style={styles.paymentSummaryStatus}>Status: Active & Verified</Text>
+                  </View>
+                )}
+
+                <Button
+                  title="Done / Return to Map"
+                  variant="primary"
+                  onPress={() => {
+                    setBookingModalVisible(false);
+                    setBookingConfirmed(false);
+                  }}
+                  style={{ marginTop: 16, width: '100%' }}
+                />
               </View>
             ) : (
               <>
@@ -390,11 +525,19 @@ export const DriverMapScreen: React.FC = () => {
                   <TouchableOpacity
                     testID="close-booking-modal"
                     onPress={() => setBookingModalVisible(false)}
+                    disabled={isProcessingPayment}
                     style={styles.closeModalBtn}
                   >
-                    <Text style={styles.closeModalText}>✕</Text>
+                    <Ionicons name="close" size={20} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
+
+                {paymentError && (
+                  <View style={styles.paymentErrorBanner}>
+                    <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+                    <Text style={styles.paymentErrorText}>{paymentError}</Text>
+                  </View>
+                )}
 
                 {/* Duration selector */}
                 <Text style={styles.durationLabel}>Select Duration (Hours):</Text>
@@ -408,6 +551,7 @@ export const DriverMapScreen: React.FC = () => {
                         bookingHours === hours && styles.durationBtnActive,
                       ]}
                       onPress={() => setBookingHours(hours)}
+                      disabled={isProcessingPayment}
                     >
                       <Text
                         style={[
@@ -442,17 +586,24 @@ export const DriverMapScreen: React.FC = () => {
                 </View>
 
                 <View style={styles.escrowNotice}>
+                  <Ionicons name="shield-checkmark-outline" size={15} color="#93C5FD" style={{ marginRight: 6 }} />
                   <Text style={styles.escrowNoticeText}>
-                    🔒 Razorpay Smart Escrow: Funds release automatically upon completed check-in.
+                    Razorpay Smart Escrow: Funds release automatically upon completed check-in.
                   </Text>
                 </View>
 
                 <Button
                   testID="confirm-booking-btn"
-                  title={`Confirm & Reserve (${formatCurrency(
-                    (selectedSpot?.hourly_rate ?? 0) * bookingHours
-                  )})`}
+                  title={
+                    isProcessingPayment
+                      ? 'Processing with Razorpay...'
+                      : `Confirm & Reserve (${formatCurrency(
+                          (selectedSpot?.hourly_rate ?? 0) * bookingHours
+                        )})`
+                  }
                   variant="primary"
+                  loading={isProcessingPayment}
+                  disabled={isProcessingPayment}
                   onPress={handleConfirmBooking}
                 />
               </>
@@ -489,7 +640,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   searchIcon: {
-    fontSize: 16,
     marginRight: 10,
   },
   searchInput: {
@@ -497,11 +647,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 14,
     padding: 0,
-  },
-  clearSearch: {
-    color: colors.textMuted,
-    fontSize: 14,
-    paddingHorizontal: 6,
   },
   filtersScroll: {
     marginBottom: 14,
@@ -518,7 +663,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   filterPillActive: {
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
+    backgroundColor: 'rgba(0, 245, 255, 0.12)',
     borderColor: colors.primary,
   },
   filterPillText: {
@@ -538,12 +683,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     color: colors.textPrimary,
+    letterSpacing: -0.3,
   },
   sectionCount: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.textSecondary,
   },
   emptyState: {
@@ -552,7 +698,6 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   emptyIcon: {
-    fontSize: 40,
     marginBottom: 12,
   },
   emptyTitle: {
@@ -569,7 +714,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'flex-end',
   },
   modalContent: {
@@ -602,13 +747,11 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.card,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  closeModalText: {
-    color: colors.textSecondary,
-    fontWeight: '700',
   },
   durationLabel: {
     fontSize: 13,
@@ -625,13 +768,13 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: colors.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
   },
   durationBtnActive: {
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
+    backgroundColor: 'rgba(0, 245, 255, 0.12)',
     borderColor: colors.primary,
   },
   durationBtnText: {
@@ -644,7 +787,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   priceSummary: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.surface,
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
@@ -673,34 +816,53 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     color: colors.textPrimary,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   totalValue: {
     color: colors.primary,
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '800',
   },
   escrowNotice: {
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(56, 189, 248, 0.08)',
     borderRadius: 10,
     padding: 10,
     marginBottom: 18,
     borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.25)',
+    borderColor: 'rgba(56, 189, 248, 0.2)',
   },
   escrowNoticeText: {
     fontSize: 11,
     color: '#93C5FD',
     lineHeight: 16,
+    flex: 1,
+  },
+  paymentErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    gap: 8,
+  },
+  paymentErrorText: {
+    color: '#FCA5A5',
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
   },
   confirmationView: {
     alignItems: 'center',
-    paddingVertical: 30,
+    paddingVertical: 24,
   },
   confirmIcon: {
-    fontSize: 50,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   confirmTitle: {
     fontSize: 20,
@@ -709,23 +871,51 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   confirmSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textSecondary,
     textAlign: 'center',
     paddingHorizontal: 20,
+    lineHeight: 18,
+  },
+  paymentSummaryCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 14,
+    width: '100%',
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  paymentSummaryLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  paymentSummaryValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.primary,
+    marginTop: 4,
+  },
+  paymentSummaryStatus: {
+    fontSize: 12,
+    color: colors.success,
+    fontWeight: '600',
+    marginTop: 4,
   },
   statusBarWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(30, 41, 59, 0.7)',
+    backgroundColor: colors.surface,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    marginHorizontal: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: colors.border,
   },
   statusBarLeft: {
     flexDirection: 'row',
@@ -754,7 +944,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   refreshBtnText: {
     color: colors.accent,
