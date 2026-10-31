@@ -1,4 +1,5 @@
 import React from 'react';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { AuthNavigator } from './AuthNavigator';
@@ -19,13 +20,22 @@ const ghostTheme = {
 };
 
 export const RootNavigator: React.FC = () => {
-  const { isAuthenticated, activePersona } = useAuth();
+  const { isLoading, userToken, userRole } = useAuth();
+
+  // Show splash loader while restoring token from expo-secure-store
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer} testID="root-loading-indicator">
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <NavigationContainer theme={ghostTheme}>
-      {!isAuthenticated ? (
+      {!userToken ? (
         <AuthNavigator />
-      ) : activePersona === 'host' ? (
+      ) : userRole === 'host' ? (
         <HostNavigator />
       ) : (
         <DriverNavigator />
@@ -33,3 +43,12 @@ export const RootNavigator: React.FC = () => {
     </NavigationContainer>
   );
 };
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
