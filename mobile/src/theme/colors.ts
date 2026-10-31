@@ -1,30 +1,31 @@
 export const colors = {
-  background: '#0B0F19',
-  surface: '#111827',
-  surfaceElevated: '#161F36',
-  card: '#131B2E',
-  cardHover: '#1B2640',
+  // Monochromatic primary palette (Deep Slate / Pitch Black)
+  background: '#090D14',
+  surface: '#0F172A',
+  surfaceElevated: '#1E293B',
+  card: '#0F172A',
+  cardHover: '#1E293B',
   border: '#1E293B',
   borderLight: '#334155',
 
-  // Text hierarchy
+  // Clean sans-serif typography hierarchy
   textPrimary: '#F8FAFC',
   textSecondary: '#94A3B8',
   textMuted: '#64748B',
 
-  // Brand Accents
-  primary: '#06B6D4', // Ghost Cyan
-  primaryGlow: 'rgba(6, 182, 212, 0.25)',
-  secondary: '#3B82F6', // Electric Blue
-  accent: '#06B6D4', // Ghost Cyan Accent
+  // Single Vibrant Accent for primary action buttons & focal points
+  primary: '#00F5FF',
+  primaryGlow: 'rgba(0, 245, 255, 0.20)',
+  secondary: '#38BDF8',
+  accent: '#00F5FF',
   indigo: '#6366F1',
 
-  // Semantic Status
-  success: '#10B981', // Available / Active
-  warning: '#F59E0B', // Pending / Low spots
-  danger: '#EF4444', // Occupied / Cancelled
+  // Semantic status
+  success: '#10B981',
+  warning: '#F59E0B',
+  danger: '#EF4444',
 
-  // Persona Badges
+  // Minimalist role indicators
   driverBadge: '#0284C7',
   hostBadge: '#8B5CF6',
 };
