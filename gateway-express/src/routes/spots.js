@@ -1,24 +1,32 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const { verifyToken, requireHost } = require('../middleware/auth');
 
 /**
  * POST /spots
- * Create a new parking spot with PostGIS Point geometry (SRID 4326)
+ * Host-only route: Create a new parking spot with PostGIS Point geometry (SRID 4326)
+ * Protected with verifyToken (authenticates user) and requireHost (blocks drivers).
  */
-router.post('/', async (req, res, next) => {
+router.post('/', verifyToken, requireHost, async (req, res, next) => {
   try {
-    const { host_id, title, address, latitude, longitude, hourly_rate, is_active } = req.body;
+    const { title, address, latitude, longitude, hourly_rate, is_active } = req.body;
+    // Use host_id from req.body if provided, or default to authenticated user id from JWT
+    const host_id = req.body.host_id || req.user.id;
 
     if (!host_id || !title || !address || latitude === undefined || longitude === undefined || hourly_rate === undefined) {
       return res.status(400).json({
-        error: 'Missing required fields: host_id, title, address, latitude, longitude, hourly_rate',
+        error: 'Missing required fields: title, address, latitude, longitude, hourly_rate',
       });
     }
 
     const host = await prisma.users.findUnique({ where: { id: host_id } });
     if (!host) {
       return res.status(404).json({ error: 'Host user not found' });
+    }
+
+    if (host.role !== 'host' && host.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied: Target user does not have host role' });
     }
 
     // Insert spot using raw SQL to properly construct ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
