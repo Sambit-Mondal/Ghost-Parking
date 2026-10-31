@@ -164,6 +164,8 @@ type ParkingSpot struct {
 	HostID         string    `json:"host_id" db:"host_id"`
 	Title          string    `json:"title" db:"title"`
 	Address        string    `json:"address" db:"address"`
+	Latitude       float64   `json:"latitude"`
+	Longitude      float64   `json:"longitude"`
 	Location       Point     `json:"location" db:"location"`
 	HourlyRate     float64   `json:"hourly_rate" db:"hourly_rate"`
 	IsActive       bool      `json:"is_active" db:"is_active"`
