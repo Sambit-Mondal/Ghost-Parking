@@ -27,10 +27,10 @@ graph TD
 
 | Service | Technology | Port | Description |
 | :--- | :--- | :--- | :--- |
-| **`mobile`** | React Native, Expo SDK 58, TypeScript | 8081 | Driver & Host mobile dashboard, map view with live radar spots, GPS check-in verification (<50m). |
-| **`gateway-express`** | Node.js, Express, Prisma ORM | 3000 | **Single Entry Point**: Authentication, Booking lifecycle, Razorpay Escrow, CORS handling, and internal HTTP proxy to Go. |
-| **`search-engine-go`** | Go 1.21, `database/sql`, PostGIS | 8080 | Spatial search engine utilizing PostGIS GIST indexes (`ST_DWithin`, `ST_DistanceSphere`) within 5-mile radius. |
-| **`postgres`** | Docker (`postgis/postgis:15-3.4`) | 5432 | Primary relational database with spatial GIS extensions enabled. |
+| **`mobile`** | React Native, Expo SDK 58, TypeScript | 8081 | Driver & Host dashboard, role-based navigation with `AuthContext` + `expo-secure-store`, custom MapView with Fabric marker layout stabilization, GPS check-in verification (<50m). |
+| **`gateway-express`** | Node.js, Express, Prisma ORM, JWT, Bcrypt | 3000 | **Single Entry Point**: Role-based JWT authentication (`POST /auth/register`, `POST /auth/login`), `verifyToken` & `requireHost` route protection, Booking lifecycle, Razorpay Escrow, CORS handling, and internal HTTP proxy to Go. |
+| **`search-engine-go`** | Go 1.22, `database/sql`, PostGIS | 8080 | Spatial search engine utilizing PostGIS GIST indexes (`ST_DWithin`, `ST_DistanceSphere`) within 5-mile radius. Auto-loads `.env` configuration. |
+| **`postgres`** | Docker (`postgis/postgis:15-3.4`) | 5434 (Host) / 5432 | Primary relational database with spatial GIS extensions enabled. |
 | **`redis`** | Docker (`redis:7-alpine`) | 6379 | In-memory cache for sessions and high-throughput query caching. |
 
 ---
@@ -176,12 +176,21 @@ Mobile App  ──GET /api/spots/nearby?latitude=...&longitude=...──>  Expre
 
 ## 🧪 Comprehensive Testing Guide
 
-### 1. Mobile Automated Test Suite (Jest & React Native Testing Library)
-Run the full mobile test suite covering unit calculations, spot normalization, and map screen components:
+### 1. Backend Express JWT & Authorization Test Suite (Jest & Supertest)
+Run the dedicated backend test suites covering role validation, bcrypt hashing, JWT issuance, route guards (`verifyToken`, `requireHost`), spot creation permissions, and Razorpay order/payment verification:
+```bash
+cd gateway-express
+
+# Run all 16 integration tests
+npm test
+```
+
+### 2. Mobile Automated Test Suite (Jest & React Native Testing Library)
+Run the 12 mobile test suites (68 unit & component tests) covering role-based authentication, navigation stack isolation, spot normalization, GPS centering, map screens, and Razorpay checkout:
 ```bash
 cd mobile
 
-# Run all 10 test suites
+# Run all 12 test suites (68 tests)
 npm test
 
 # Run tests with code coverage report
@@ -189,6 +198,9 @@ npm run test:coverage
 ```
 
 **Key Test Suites Included:**
+- `__tests__/components/RootNavigator.test.tsx`: Tests conditional root navigation rendering (Auth Stack on missing token, `DriverTabNavigator` on driver role, `HostTabNavigator` on host role).
+- `__tests__/components/RegisterScreen.test.tsx` & `LoginScreen.test.tsx`: Tests driver/host role toggle UI, form validation, error banners, and secure store persistence.
+- `__tests__/unit/authContext.test.tsx`: Validates `AuthContext` state lifecycle, `expo-secure-store` token persistence, and role changes.
 - `__tests__/unit/spotService.test.ts`: Tests `normalizeSpot()`, Go PostGIS response parsing, Express fallback routing, and network failure tolerance.
 - `__tests__/unit/geo.test.ts`: Validates distance calculations (`calculateDistanceMeters`) and the <50m check-in radius constraint (`isWithinCheckInRadius`).
 - `__tests__/components/DriverMapScreen.test.tsx`: Tests live backend connection status indicator, search query filtering, affordability pill filters, and reservation modals.
@@ -196,7 +208,7 @@ npm run test:coverage
 
 ---
 
-### 2. End-to-End PowerShell Integration Test Suites
+### 3. End-to-End PowerShell Integration Test Suites
 When containers and backend services are running, execute the automated end-to-end integration test suites:
 
 ```powershell
