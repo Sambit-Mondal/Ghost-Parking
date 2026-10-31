@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import colors from '../../theme/colors';
 import { Badge } from './Badge';
@@ -15,7 +15,8 @@ export const Header: React.FC<HeaderProps> = ({
   subtitle,
   showPersonaToggle = true,
 }) => {
-  const { user, activePersona, togglePersona } = useAuth();
+  const { user, userRole } = useAuth();
+  const currentRole = userRole || user?.role || 'driver';
 
   return (
     <View style={styles.container}>
@@ -27,10 +28,12 @@ export const Header: React.FC<HeaderProps> = ({
           </>
         ) : (
           <View style={styles.brandRow}>
-            <Text style={styles.ghostIcon}>👻</Text>
+            <View style={styles.logoMark}>
+              <Text style={styles.logoMarkText}>GP</Text>
+            </View>
             <View>
-              <Text style={styles.brandName}>Ghost Parking</Text>
-              <Text style={styles.brandTagline}>Urban Spatial Network</Text>
+              <Text style={styles.brandName}>GHOST PARKING</Text>
+              <Text style={styles.brandTagline}>Spatial Network</Text>
             </View>
           </View>
         )}
@@ -38,17 +41,12 @@ export const Header: React.FC<HeaderProps> = ({
 
       <View style={styles.right}>
         {showPersonaToggle && (
-          <TouchableOpacity
-            testID="header-persona-toggle"
-            activeOpacity={0.8}
-            onPress={togglePersona}
-            style={styles.personaButton}
-          >
+          <View testID="header-persona-toggle" style={styles.personaBadgeWrapper}>
             <Badge
-              label={activePersona === 'driver' ? '🚗 Driver' : '🏠 Host'}
-              variant={activePersona === 'driver' ? 'driver' : 'host'}
+              label={currentRole === 'driver' ? 'Driver' : 'Host'}
+              variant={currentRole === 'driver' ? 'driver' : 'host'}
             />
-          </TouchableOpacity>
+          </View>
         )}
 
         {user?.avatarUrl ? (
@@ -81,41 +79,55 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  ghostIcon: {
-    fontSize: 26,
+  logoMark: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 10,
   },
-  brandName: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
+  logoMarkText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: colors.primary,
     letterSpacing: -0.5,
   },
+  brandName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    letterSpacing: 0.5,
+  },
   brandTagline: {
-    fontSize: 11,
-    color: colors.primary,
+    fontSize: 10,
+    color: colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
     color: colors.textPrimary,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 13,
-    color: colors.textSecondary,
+    fontSize: 12,
+    color: colors.textMuted,
     marginTop: 2,
+    fontWeight: '500',
   },
   right: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
-  personaButton: {
-    marginRight: 4,
+  personaBadgeWrapper: {
+    justifyContent: 'center',
   },
   avatar: {
     width: 36,
@@ -129,14 +141,14 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     backgroundColor: colors.surfaceElevated,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.borderLight,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
   },
   avatarInitial: {
-    color: colors.textPrimary,
-    fontWeight: '700',
     fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
 });
