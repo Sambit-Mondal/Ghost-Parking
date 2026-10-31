@@ -11,6 +11,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import colors from '../../theme/colors';
 import { Header } from '../../components/common/Header';
 import { Card } from '../../components/common/Card';
@@ -130,7 +131,7 @@ export const HostListingsScreen: React.FC = () => {
         {/* Razorpay Escrow Status Banner */}
         <View style={styles.payoutCard}>
           <View style={styles.payoutLeft}>
-            <Text style={styles.payoutTitle}>💳 Razorpay Route Connected</Text>
+            <Text style={styles.payoutTitle}>Razorpay Route Connected</Text>
             <Text style={styles.payoutSubtitle}>
               Linked Account: acc_ghost_host_882 • Escrow 80/20 active
             </Text>
@@ -218,7 +219,7 @@ export const HostListingsScreen: React.FC = () => {
                 onPress={() => setAddModalVisible(false)}
                 style={styles.closeModalBtn}
               >
-                <Text style={styles.closeModalText}>✕</Text>
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -255,8 +256,8 @@ export const HostListingsScreen: React.FC = () => {
 
             <View style={styles.splitPreview}>
               <Text style={styles.previewText}>
-                💡 At ₹{newRate || 0}/hr, you receive ₹
-                {Math.round((parseInt(newRate, 10) || 0) * 0.8)}/hr deposited via Razorpay.
+                At ₹{newRate || 0}/hr, you receive ₹
+                {Math.round((parseInt(newRate, 10) || 0) * 0.8)}/hr deposited via Razorpay Route.
               </Text>
             </View>
 
