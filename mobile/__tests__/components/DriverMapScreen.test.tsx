@@ -1,7 +1,28 @@
 import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
-import { DriverMapScreen } from '../../src/screens/driver/DriverMapScreen';
+import { DriverMapScreen, INITIAL_SPOTS } from '../../src/screens/driver/DriverMapScreen';
 import { AuthProvider } from '../../src/context/AuthContext';
+
+// Mock Razorpay payment service for deterministic component testing
+jest.mock('../../src/services/paymentService', () => ({
+  createPaymentOrder: jest.fn(async () => ({
+    success: true,
+    order_id: 'order_test_mock_123',
+    amount: 24000,
+    currency: 'INR',
+    key_id: 'rzp_test_placeholder',
+    booking_id: 'booking_test_mock_123',
+  })),
+  openRazorpayCheckout: jest.fn(async () => ({
+    razorpay_payment_id: 'pay_test_mock_123',
+    razorpay_order_id: 'order_test_mock_123',
+    razorpay_signature: 'sig_test_mock_123',
+  })),
+  verifyPayment: jest.fn(async () => ({
+    success: true,
+    booking: { id: 'booking_test_mock_123', status: 'active' },
+  })),
+}));
 
 describe('Component Test: DriverMapScreen', () => {
   const renderScreen = () =>
@@ -45,7 +66,7 @@ describe('Component Test: DriverMapScreen', () => {
 
   it('opens booking modal upon pressing Reserve on a spot card', () => {
     const { getByTestId, getByText } = renderScreen();
-    const reserveBtn = getByTestId('spot-card-spot-101-reserve-btn');
+    const reserveBtn = getByTestId(`spot-card-${INITIAL_SPOTS[0].id}-reserve-btn`);
 
     fireEvent.press(reserveBtn);
 
@@ -56,7 +77,7 @@ describe('Component Test: DriverMapScreen', () => {
 
   it('updates reservation total when duration is changed and locks escrow on confirm', async () => {
     const { getByTestId, getByText } = renderScreen();
-    const reserveBtn = getByTestId('spot-card-spot-101-reserve-btn');
+    const reserveBtn = getByTestId(`spot-card-${INITIAL_SPOTS[0].id}-reserve-btn`);
     fireEvent.press(reserveBtn);
 
     // Select 3 hours (Rate ₹80 * 3 = ₹240)
