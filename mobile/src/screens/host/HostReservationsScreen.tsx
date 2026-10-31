@@ -144,12 +144,12 @@ export const HostReservationsScreen: React.FC = () => {
                       item.escrowStatus === 'settled' && styles.escrowSettled,
                     ]}
                   >
-                    {item.escrowStatus === 'settled' ? '✓ Settled' : '🔒 Held'}
+                    {item.escrowStatus === 'settled' ? 'Settled' : 'Held'}
                   </Text>
                 </View>
               </View>
 
-              <Text style={styles.timeWindow}>🕒 {item.timeWindow}</Text>
+              <Text style={styles.timeWindow}>{item.timeWindow}</Text>
             </Card>
           );
         })}
