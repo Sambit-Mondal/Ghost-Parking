@@ -118,6 +118,8 @@ func (db *DB) GetNearbySpots5Miles(lat, lng float64, limit int) ([]models.Parkin
 		}
 
 		s.Location = models.Point{Longitude: spotLng, Latitude: spotLat}
+		s.Latitude = spotLat
+		s.Longitude = spotLng
 		s.DistanceMeters = &distMeters
 		distMiles := distMeters / 1609.344
 		s.DistanceMiles = &distMiles
@@ -197,6 +199,8 @@ func (db *DB) SearchNearbySpots(params models.SearchParams) ([]models.ParkingSpo
 		}
 
 		s.Location = models.Point{Longitude: lng, Latitude: lat}
+		s.Latitude = lat
+		s.Longitude = lng
 		s.DistanceMeters = &dist
 		spots = append(spots, s)
 	}
@@ -262,6 +266,8 @@ func (db *DB) GetAllSpots(limit, offset int) ([]models.ParkingSpot, error) {
 		}
 
 		s.Location = models.Point{Longitude: lng, Latitude: lat}
+		s.Latitude = lat
+		s.Longitude = lng
 		spots = append(spots, s)
 	}
 
@@ -304,6 +310,9 @@ func (db *DB) GetSpotByID(id string) (*models.ParkingSpot, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	s.Latitude = s.Location.Latitude
+	s.Longitude = s.Location.Longitude
 
 	return &s, nil
 }
