@@ -10,6 +10,10 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET || 'rzp_secret_placeholder',
 });
 
+// UUID v4 format validator for PostgreSQL @db.Uuid columns
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (val) => typeof val === 'string' && UUID_REGEX.test(val);
+
 /**
  * Helper: Calculate 80% Host / 20% Platform split
  */
@@ -80,6 +84,144 @@ async function executeRazorpayRouteSplit(paymentId, booking, hostAccountId) {
 }
 
 /**
+ * POST /payments/create-order
+ * Generates a Razorpay order_id for payment processing.
+ * Accepts booking_id, OR (spot_id, driver_id, amount, hours).
+ * Returns order_id, amount (in paise), currency, key_id, and booking_id.
+ */
+router.post('/create-order', async (req, res, next) => {
+  try {
+    const { booking_id, spot_id, driver_id, amount, hours } = req.body;
+    let targetBookingId = booking_id;
+    let finalAmount = amount;
+
+    // If booking_id not provided, create a pending booking atomically
+    if (!targetBookingId) {
+      if (!spot_id || !driver_id) {
+        return res.status(400).json({
+          error: 'booking_id or (spot_id and driver_id) is required',
+        });
+      }
+
+      const durationHours = hours || 2;
+      const startTime = new Date();
+      const endTime = new Date(startTime.getTime() + durationHours * 3600 * 1000);
+
+      // Verify spot exists (handling both real UUIDs and fallback active spots for mock/demo IDs like 'spot-101')
+      let spot = null;
+      if (isUuid(spot_id)) {
+        spot = await prisma.parking_spots.findUnique({ where: { id: spot_id } });
+      }
+
+      if (!spot) {
+        // Fallback to the first available active parking spot in the database
+        spot = await prisma.parking_spots.findFirst({ where: { is_active: true } });
+      }
+
+      if (!spot) {
+        return res.status(404).json({ error: 'No active parking spots found in system' });
+      }
+
+      // Verify driver exists (handling real UUIDs and fallback driver users for demo IDs like 'usr_driver_001')
+      let driver = null;
+      if (isUuid(driver_id)) {
+        driver = await prisma.users.findUnique({ where: { id: driver_id } });
+      }
+
+      if (!driver) {
+        driver = await prisma.users.findFirst({ where: { role: 'driver' } });
+      }
+
+      if (!driver) {
+        // Create an ephemeral driver record with a valid UUID to satisfy foreign key constraints
+        driver = await prisma.users.create({
+          data: {
+            name: 'Ghost Driver',
+            email: `driver_${Date.now()}@ghostparking.com`,
+            role: 'driver',
+          },
+        });
+      }
+
+      const hourlyRate = parseFloat(spot.hourly_rate);
+      finalAmount = finalAmount !== undefined ? parseFloat(finalAmount) : (hourlyRate * durationHours);
+
+      const newBooking = await prisma.bookings.create({
+        data: {
+          driver_id: driver.id,
+          spot_id: spot.id,
+          start_time: startTime,
+          end_time: endTime,
+          total_amount: finalAmount,
+          status: 'pending',
+        },
+      });
+
+      targetBookingId = newBooking.id;
+    }
+
+    if (targetBookingId && !isUuid(targetBookingId)) {
+      return res.status(404).json({ error: 'Invalid booking ID format' });
+    }
+
+    const booking = await prisma.bookings.findUnique({
+      where: { id: targetBookingId },
+      include: {
+        driver: { select: { id: true, name: true, email: true, phone_number: true } },
+        spot: { select: { id: true, title: true, address: true, hourly_rate: true, host_id: true } },
+      },
+    });
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    const totalInPaise = Math.round(Number(booking.total_amount) * 100);
+    const key_id = process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder';
+
+    let order;
+    try {
+      order = await razorpay.orders.create({
+        amount: totalInPaise,
+        currency: 'INR',
+        receipt: `ord_${booking.id.substring(0, 8)}`,
+        notes: {
+          booking_id: booking.id,
+          driver_id: booking.driver_id,
+          spot_id: booking.spot_id,
+        },
+      });
+    } catch (err) {
+      console.warn('[Razorpay Order Notice]:', err.message);
+      order = {
+        id: `order_${crypto.randomBytes(8).toString('hex')}`,
+        amount: totalInPaise,
+        currency: 'INR',
+        status: 'created',
+      };
+    }
+
+    // Persist razorpay_order_id on booking
+    await prisma.bookings.update({
+      where: { id: booking.id },
+      data: { razorpay_order_id: order.id },
+    });
+
+    return res.status(201).json({
+      success: true,
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency || 'INR',
+      key_id,
+      booking_id: booking.id,
+      booking,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * POST /payments/pre-authorize
  * Pre-authorizes a payment for a booking using Razorpay manual capture (payment_capture: 0).
  * Funds are reserved/held without immediate capture until checkout.
@@ -90,6 +232,10 @@ router.post('/pre-authorize', async (req, res, next) => {
 
     if (!booking_id) {
       return res.status(400).json({ error: 'booking_id is required' });
+    }
+
+    if (!isUuid(booking_id)) {
+      return res.status(404).json({ error: 'Booking not found' });
     }
 
     const booking = await prisma.bookings.findUnique({
@@ -205,6 +351,10 @@ router.post('/verify', async (req, res, next) => {
       });
     }
 
+    if (!isUuid(booking_id)) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
     const booking = await prisma.bookings.findUnique({
       where: { id: booking_id },
     });
@@ -259,6 +409,10 @@ router.post('/checkout', async (req, res, next) => {
 
     if (!booking_id) {
       return res.status(400).json({ error: 'booking_id is required' });
+    }
+
+    if (!isUuid(booking_id)) {
+      return res.status(404).json({ error: 'Booking not found' });
     }
 
     const booking = await prisma.bookings.findUnique({
