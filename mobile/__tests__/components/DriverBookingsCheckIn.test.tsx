@@ -25,7 +25,7 @@ describe('Component Test: Driver Check-In Logic', () => {
 
     expect(getByTestId('booking-card-res_live_772')).toBeTruthy();
     expect(getByTestId('check-in-btn-res_live_772')).toBeTruthy();
-    expect(getAllByText('📍 I have arrived (Check In)').length).toBeGreaterThan(0);
+    expect(getAllByText('I have arrived (Check In)').length).toBeGreaterThan(0);
   });
 
   it('throws an error and rejects check-in if the user is further than 50 meters (120m)', async () => {

@@ -16,7 +16,7 @@ describe('Component Test: HostListingsScreen', () => {
 
     expect(getByTestId('host-kpi-earnings')).toBeTruthy();
     expect(getByTestId('host-kpi-active')).toBeTruthy();
-    expect(getByText('💳 Razorpay Route Connected')).toBeTruthy();
+    expect(getByText('Razorpay Route Connected')).toBeTruthy();
     expect(getByTestId('add-spot-button')).toBeTruthy();
     expect(getByText('MG Road Metro Hub Parking')).toBeTruthy();
   });
