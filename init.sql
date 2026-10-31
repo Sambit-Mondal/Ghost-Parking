@@ -12,6 +12,7 @@ CREATE TABLE users (
     role user_role NOT NULL DEFAULT 'driver',
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
+    password VARCHAR(255),
     phone_number VARCHAR(20) UNIQUE,
     razorpay_account_id VARCHAR(100), -- For Host escrow payouts
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
