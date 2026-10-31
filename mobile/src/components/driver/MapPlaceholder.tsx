@@ -60,7 +60,9 @@ export const MapPlaceholder: React.FC<MapPlaceholderProps> = ({
             onPress={() => onSelectSpot(spot)}
             style={[styles.spotPin, pos, isSelected && styles.selectedSpotPin]}
           >
-            <Text style={styles.pinIcon}>🅿️</Text>
+            <View style={[styles.pinMark, isSelected && styles.selectedPinMark]}>
+              <Text style={[styles.pinMarkText, isSelected && styles.selectedPinMarkText]}>P</Text>
+            </View>
             <View style={[styles.pinBadge, isSelected && styles.selectedPinBadge]}>
               <Text style={[styles.pinPrice, isSelected && styles.selectedPinPrice]}>
                 ₹{spot.hourly_rate}
@@ -168,8 +170,27 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.15 }],
     zIndex: 30,
   },
-  pinIcon: {
-    fontSize: 18,
+  pinMark: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectedPinMark: {
+    backgroundColor: colors.primary,
+    borderColor: '#FFFFFF',
+  },
+  pinMarkText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: colors.primary,
+  },
+  selectedPinMarkText: {
+    color: '#000000',
   },
   pinBadge: {
     backgroundColor: colors.surfaceElevated,
