@@ -7,6 +7,7 @@ import {
   Platform,
 } from 'react-native';
 import MapView, { Marker, Region, PROVIDER_DEFAULT } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
 import colors from '../../theme/colors';
 import { ParkingSpotData } from './SpotCard';
 import { formatCurrency } from '../../utils/formatting';
@@ -105,30 +106,55 @@ export const DriverMapView: React.FC<DriverMapViewProps> = ({
 }) => {
   const mapRef = useRef<MapView | null>(null);
 
-  // Default region centered around central Bengaluru spots
+  // Default region centered around user GPS location or central Bengaluru
   const initialRegion: Region = {
-    latitude: 12.9716,
-    longitude: 77.5946,
-    latitudeDelta: 0.08,
-    longitudeDelta: 0.08,
+    latitude: userLocation?.latitude || 12.9716,
+    longitude: userLocation?.longitude || 77.5946,
+    latitudeDelta: 0.05,
+    longitudeDelta: 0.05,
   };
+
+  // Center on user GPS location on first arrival if map is mounted
+  useEffect(() => {
+    if (userLocation && mapRef.current) {
+      mapRef.current.animateToRegion(
+        {
+          latitude: userLocation.latitude,
+          longitude: userLocation.longitude,
+          latitudeDelta: 0.04,
+          longitudeDelta: 0.04,
+        },
+        500
+      );
+    }
+  }, [userLocation?.latitude, userLocation?.longitude]);
 
   useEffect(() => {
     if (selectedSpotId && mapRef.current) {
       const spot = spots.find((s) => s.id === selectedSpotId);
-      if (spot) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: spot.latitude,
-            longitude: spot.longitude,
-            latitudeDelta: 0.03,
-            longitudeDelta: 0.03,
-          },
-          600
-        );
+      if (
+        spot &&
+        typeof spot.latitude === 'number' &&
+        !isNaN(spot.latitude) &&
+        typeof spot.longitude === 'number' &&
+        !isNaN(spot.longitude)
+      ) {
+        try {
+          mapRef.current.animateToRegion(
+            {
+              latitude: spot.latitude,
+              longitude: spot.longitude,
+              latitudeDelta: 0.03,
+              longitudeDelta: 0.03,
+            },
+            500
+          );
+        } catch {
+          // Guard against unmounted native map calls
+        }
       }
     }
-  }, [selectedSpotId, spots]);
+  }, [selectedSpotId]);
 
   const handleRecenter = () => {
     if (!mapRef.current) return;
@@ -147,6 +173,16 @@ export const DriverMapView: React.FC<DriverMapViewProps> = ({
     }
   };
 
+  // Strictly filter array of objects with valid numeric coordinates
+  const validSpots = (Array.isArray(spots) ? spots : []).filter(
+    (spot) =>
+      spot &&
+      typeof spot.latitude === 'number' &&
+      !isNaN(spot.latitude) &&
+      typeof spot.longitude === 'number' &&
+      !isNaN(spot.longitude)
+  );
+
   return (
     <View style={styles.container} testID={testID}>
       <MapView
@@ -160,7 +196,7 @@ export const DriverMapView: React.FC<DriverMapViewProps> = ({
         showsMyLocationButton={false}
         showsCompass={true}
       >
-        {spots.map((spot) => {
+        {validSpots.map((spot) => {
           const isSelected = spot.id === selectedSpotId;
 
           return (
@@ -171,8 +207,6 @@ export const DriverMapView: React.FC<DriverMapViewProps> = ({
                 latitude: spot.latitude,
                 longitude: spot.longitude,
               }}
-              title={spot.title}
-              description={`${formatCurrency(spot.hourly_rate)}/hr • ${spot.available_slots ?? 1} slots left`}
               pinColor={isSelected ? '#00F5FF' : '#3B82F6'}
               tracksViewChanges={false}
               onPress={() => onSelectSpot(spot)}
@@ -189,14 +223,14 @@ export const DriverMapView: React.FC<DriverMapViewProps> = ({
           onPress={handleRecenter}
           activeOpacity={0.8}
         >
-          <Text style={styles.controlBtnText}>🎯</Text>
+          <Ionicons name="locate" size={20} color={colors.primary} />
         </TouchableOpacity>
       </View>
 
       {/* Selected Spot Quick Header Overlay */}
       {selectedSpotId && (
         <View style={styles.activeSpotBar}>
-          <Text style={styles.activeSpotIndicator}>●</Text>
+          <Text style={styles.activeSpotIndicator}>•</Text>
           <Text style={styles.activeSpotText} numberOfLines={1}>
             Selected: {spots.find((s) => s.id === selectedSpotId)?.title}
           </Text>
