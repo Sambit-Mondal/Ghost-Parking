@@ -1,18 +1,44 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"search-engine-go/db"
 	"search-engine-go/handlers"
 )
+
+func loadEnv(filepath string) {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			k := strings.TrimSpace(parts[0])
+			v := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+			if os.Getenv(k) == "" {
+				os.Setenv(k, v)
+			}
+		}
+	}
+}
 
 func getEnv(key, fallback string) string {
 	if val := os.Getenv(key); val != "" {
@@ -43,8 +69,11 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	loadEnv(".env")
+	loadEnv("../.env")
+
 	port := getEnv("PORT", "8080")
-	dbURL := getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/ghost_parking?sslmode=disable")
+	dbURL := getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5434/ghost_parking?sslmode=disable")
 
 	log.Printf("[Search Engine] Initializing service on port %s...", port)
 
