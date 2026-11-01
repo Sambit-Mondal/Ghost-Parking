@@ -479,30 +479,245 @@ Ghost-Parking/
 
 ## Operational Specifications & Design Constraints
 
-1. **Card Input Formatting & Verification**:
-   - Card number fields automatically enforce a 19-character limit (`XXXX XXXX XXXX XXXX`) via `formatCardNumber`.
-   - Raw digits are stripped of non-numeric characters via `stripCardNumber` prior to payload dispatch to `/payments/verify`.
-   - Payment signatures are validated using standard `HMAC-SHA256` matching Razorpay's cryptographic specification:
+### 1. Card Input Formatting & Numeric Payload Extraction
 
-   ```text
-   signature = HMAC-SHA256(order_id + "|" + payment_id, secret)
+To protect against buffer and layout overflow bugs in the mobile client while maintaining clean numerical payloads for payment processing, all card entry fields adhere to strict formatting and validation rules:
+
+- **19-Character Layout Constraint**: Card number fields restrict entry to a maximum of 19 characters (16 numerical digits plus 3 interstitial whitespace delimiters).
+- **Dynamic Grouping Engine**: The utility function `formatCardNumber` strips all non-numeric characters and inserts a single space delimiter after every 4 digits:
+  ```typescript
+  export const formatCardNumber = (value: string): string => {
+    if (!value) return '';
+    const cleanDigits = value.replace(/\D/g, '').slice(0, 16);
+    return cleanDigits.replace(/(\d{4})/g, '$1 ').trim();
+  };
+  ```
+- **Payload Extraction Isolation**: As the user types, the UI component renders the grouped display representation (`XXXX XXXX XXXX XXXX`). Before dispatching the payload to `/payments/verify`, the component extracts pure numeric digits using `stripCardNumber` (aliased as `cleanCardNumber`):
+  ```typescript
+  export const stripCardNumber = (value: string): string => {
+    if (!value) return '';
+    return value.replace(/\D/g, '').slice(0, 16);
+  };
+  ```
+
+### 2. Cryptographic Payment Verification (HMAC-SHA256)
+
+Payment authenticity is guaranteed via cryptographic signature validation matching Razorpay's specification. The Express API Gateway accepts order IDs, payment IDs, and signatures at `POST /payments/verify` and validates integrity against the server-side `RAZORPAY_KEY_SECRET`:
+
+```text
+signature = HMAC-SHA256(order_id + "|" + payment_id, secret)
+```
+
+Implementation logic in `gateway-express/src/routes/payments.js`:
+```javascript
+const expectedSignature = crypto
+  .createHmac('sha256', razorpaySecret)
+  .update(`${effectiveOrderId}|${paymentId}`)
+  .digest('hex');
+
+if (expectedSignature !== signature) {
+  return res.status(400).json({ error: 'Invalid payment signature' });
+}
+```
+
+- **Tamper Resistance**: If `expectedSignature !== signature`, the gateway immediately rejects the request with HTTP `400 Bad Request`, halts the escrow workflow, and retains the booking in `pending` status.
+- **Dual Execution Pathways**:
+  - *Native SDK Pathway*: Mobile clients running in compiled builds forward native callbacks (`razorpay_payment_id`, `razorpay_order_id`, `razorpay_signature`).
+  - *Sandboxed Development Pathway*: Expo Go sessions utilize test card inputs (`POST /payments/verify` with `card_number`). The gateway validates format, generates an authorized payment identifier (`pay_test_...`), and computes the canonical HMAC-SHA256 signature server-side.
+
+### 3. Dynamic 80/20 Financial Split Settlement (Razorpay Route)
+
+The platform implements an automated financial clearing model allocating 80% of gross booking revenues to property hosts and retaining a 20% commission fee:
+
+```text
+Host Net Earnings (80%)   = round(Total Amount * 0.80)
+Platform Commission (20%) = Total Amount - Host Net Earnings
+```
+
+- **Calculated Split in Minor Currency Units (Paise)**:
+  - Total Paise: `Math.round(totalAmount * 100)`
+  - Host Share Paise: `Math.round(totalPaise * 0.80)`
+  - Platform Share Paise: `totalPaise - hostSharePaise`
+- **Razorpay Route Transfer Execution**:
+  ```javascript
+  const transferPayload = {
+    transfers: [
+      {
+        account: hostAccountId,
+        amount: split.hostSharePaise,
+        currency: 'INR',
+        notes: {
+          booking_id: booking.id,
+          driver_id: booking.driver_id,
+          split_rule: '80_percent_host',
+        },
+        on_hold: 0,
+      },
+    ],
+  };
+  await razorpay.payments.transfer(paymentId, transferPayload);
+  ```
+- **Escrow Fallback Policy**: When a host has not yet linked a verified `razorpay_account_id`, the host net earnings are retained in the platform escrow pool (`held_in_escrow`), and a transaction record is created with `status: 'held_in_escrow'` until account linkage is completed.
+
+### 4. Geofenced Driver Check-In Constraint (<50 Meters)
+
+To confirm physical vehicle arrival and authorize space occupancy, the system evaluates the Euclidean distance between the driver's device coordinates and the registered parking spot coordinates.
+
+The distance calculation employs the spherical law of cosines:
+
+$$
+D = 2R \arcsin\left(\sqrt{\sin^2\left(\frac{\Delta \phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta \lambda}{2}\right)}\right)
+$$
+
+Where:
+- $R = 6,371,000\text{ meters}$ (mean volumetric radius of Earth).
+- $\phi_1, \phi_2$ denote the driver and parking spot latitudes in radians.
+- $\Delta\phi = \phi_2 - \phi_1$ denotes the latitude difference.
+- $\Delta\lambda = \lambda_2 - \lambda_1$ denotes the longitude difference.
+
+Constraint Enforcement:
+- Physical check-in is authorized if and only if:
+  $$D \le 50.0\text{ meters}$$
+- When $D > 50\text{ meters}$, the gateway returns:
+  ```json
+  {
+    "error": "Driver is not within 50 meters of the parking spot",
+    "distance_meters": 342.5,
+    "max_allowed_meters": 50.0
+  }
+  ```
+- Upon valid check-in ($D \le 50\text{m}$), the booking status transitions to `active`, and a targeted `booking_updated` event is dispatched across Socket.io to both host and driver rooms.
+
+---
+
+## Contributing
+
+We welcome contributions from the engineering community. All contributors must adhere to the engineering standards and quality gates detailed below.
+
+### Branching Strategy
+
+The repository follows a modified GitFlow branching model centered on a protected `main` branch:
+
+- `main`: Production-ready branch. Direct pushes are disabled; all updates arrive via approved pull requests.
+- `develop`: Integration and staging branch for feature merges.
+- Working branches must branch off `develop` (or `main` for critical production hotfixes) using strict naming prefixes:
+  - `feature/<ticket-id>-<short-description>`: New functional capabilities (e.g., `feature/GP-104-spatial-clustering`).
+  - `bugfix/<ticket-id>-<short-description>`: Defect repairs (e.g., `bugfix/GP-212-card-format-overflow`).
+  - `hotfix/<ticket-id>-<short-description>`: Production emergency patches (e.g., `hotfix/GP-301-gateway-cors`).
+  - `chore/<ticket-id>-<short-description>`: Maintenance, dependency updates, and tooling.
+
+### Commit Message Standards
+
+All commits must adhere to the Conventional Commits 1.0.0 specification:
+
+```text
+<type>(<scope>): <subject in present imperative tense>
+
+[optional body describing the technical rationale]
+
+[optional footer referencing issue or breaking change]
+```
+
+Permitted commit types:
+- `feat`: Addition of a new user- or system-facing feature.
+- `fix`: Resolution of a defect or bug.
+- `docs`: Documentation modifications only.
+- `refactor`: Code changes that neither fix a bug nor introduce a feature.
+- `perf`: Optimizations that improve execution speed or resource utilization.
+- `test`: Addition or modification of unit, integration, or component tests.
+- `build`: Modifications affecting build systems, packaging, or external dependencies.
+- `ci`: Changes to continuous integration pipelines and configuration scripts.
+- `chore`: Routine operational, toolchain, or metadata maintenance.
+
+Permitted scopes:
+`gateway`, `search`, `mobile`, `db`, `infra`, `auth`, `payments`, `socket`.
+
+Example commit messages:
+```text
+feat(gateway): implement user-scoped booking query endpoint
+fix(mobile): enforce 19-character limit on card number input
+test(search): add PostGIS spatial radius benchmark assertions
+chore(deps): update prisma client to version 5.10.2
+```
+
+### Pull Request Protocols
+
+Prior to submitting a pull request:
+1. Rebase your working branch onto the latest `origin/main` to ensure linear history.
+2. Execute the test suites across all affected services and confirm zero test regressions:
+   ```bash
+   # Backend Gateway Test Suite
+   npm --prefix gateway-express test
+
+   # Mobile Test Suite
+   npm --prefix mobile test
    ```
+3. Ensure no linting or type-checking errors exist.
+4. Complete the Pull Request template:
+   - Provide a concise summary of technical changes.
+   - Detail reproduction or verification steps.
+   - Attach test execution output or benchmark metrics.
+5. Code reviews require approval from at least one core engineer prior to merging.
+6. Merges are performed via Squash and Merge or Rebase and Merge to maintain a clean git history.
 
-2. **Host Split Calculation**:
-   - Financial distributions are calculated dynamically upon payment authorization:
+---
 
-   ```text
-   Host Net Earnings (80%)  = round(Total Amount * 0.80)
-   Platform Commission (20%) = Total Amount - Host Net Earnings
-   ```
+## Issue Reporting
 
-   - Payout transfers to host linked accounts (`razorpay_account_id`) are executed immediately upon payment verification or held in platform escrow if pending account association.
+When reporting defects or proposing architectural enhancements, use the standardized issue templates below.
 
-3. **Geofenced Check-In Constraint**:
-   - Euclidean spatial distance is computed via the spherical law of cosines:
+### Bug Report Guidelines
 
-   $$
-   D = 2R \arcsin\left(\sqrt{\sin^2\left(\frac{\Delta \phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta \lambda}{2}\right)}\right)
-   $$
+Submit bug reports via the repository Issue Tracker with the following structure:
 
-   - Check-in is authorized if and only if distance constraint $D \le 50\text{ meters}$ is satisfied.
+```markdown
+### Environment Information
+- Operating System: [e.g., Windows 11, Ubuntu 22.04 LTS, macOS 14]
+- Node.js Version: [e.g., v20.11.0]
+- Go Version: [e.g., go1.22.1]
+- Docker Engine Version: [e.g., 24.0.7]
+- Mobile Device / OS: [e.g., Pixel 7 Android 14 / Expo Go 58.0.0]
+
+### Problem Description
+A clear and concise description of the observed defect.
+
+### Reproduction Steps
+1. Execute endpoint '...' with payload '...'
+2. Observe status code '...'
+3. Note error banner in mobile view '...'
+
+### Expected Behavior
+A concise description of the expected system response.
+
+### Diagnostic Logs
+```text
+[Paste relevant gateway, Go daemon, or Metro terminal logs here]
+```
+```
+
+### Feature Request Guidelines
+
+Propose new capabilities with the following structure:
+
+```markdown
+### Problem Statement
+A concise description of the business need or architectural bottleneck.
+
+### Proposed Technical Solution
+Detailed description of the proposed service, endpoint, or schema change.
+
+### Affected Microservices
+- [ ] API Gateway (Node.js/Express)
+- [ ] Spatial Search Engine (Go)
+- [ ] Mobile Client (React Native/Expo)
+- [ ] Database / PostGIS Schema
+
+### Alternatives Considered
+Other architectural approaches evaluated and reasons for rejection.
+```
+
+---
+
+## License
+
+This software is distributed under the terms of the MIT License. For complete terms, conditions, and copyright notices, refer to the [LICENSE](LICENSE) file located at the root of this repository.
