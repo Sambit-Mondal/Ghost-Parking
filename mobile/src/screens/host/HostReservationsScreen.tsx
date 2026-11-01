@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,13 +8,16 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import colors from '../../theme/colors';
 import { Header } from '../../components/common/Header';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { formatCurrency, calculateHostSplit } from '../../utils/formatting';
+import { useAuth } from '../../context/AuthContext';
+import { connectSocket, onBookingUpdated } from '../../services/socketService';
 
-interface HostReservation {
+export interface HostReservation {
   id: string;
   spotTitle: string;
   driverName: string;
@@ -25,7 +28,7 @@ interface HostReservation {
   escrowStatus: 'locked' | 'settled';
 }
 
-const RESERVATIONS: HostReservation[] = [
+export const INITIAL_HOST_RESERVATIONS: HostReservation[] = [
   {
     id: 'h_res_101',
     spotTitle: 'MG Road Metro Hub Parking (Bay A-12)',
@@ -59,9 +62,81 @@ const RESERVATIONS: HostReservation[] = [
 ];
 
 export const HostReservationsScreen: React.FC = () => {
+  const { userToken } = useAuth();
+  const [reservations, setReservations] = useState<HostReservation[]>(INITIAL_HOST_RESERVATIONS);
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [liveBanner, setLiveBanner] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
 
-  const filtered = RESERVATIONS.filter((r) => {
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    // Connect socket with authenticated Host token to join private room_user_{id}
+    connectSocket({ token: userToken });
+
+    // Listen for targeted 'booking_updated' socket events
+    const handleBookingUpdated = (rawBooking: any) => {
+      if (!isMountedRef.current || !rawBooking || !rawBooking.id) return;
+
+      const mappedStatus: 'active' | 'upcoming' | 'completed' =
+        rawBooking.status === 'completed'
+          ? 'completed'
+          : rawBooking.status === 'active'
+          ? 'active'
+          : 'upcoming';
+
+      const escrowStatus: 'locked' | 'settled' =
+        rawBooking.status === 'completed' ? 'settled' : 'locked';
+
+      const spotTitle =
+        rawBooking.spot?.title || rawBooking.spotTitle || 'Parking Bay';
+      const driverName =
+        rawBooking.driver?.name || rawBooking.driverName || 'Verified Driver';
+      const vehiclePlate =
+        rawBooking.vehiclePlate || 'KA 01 GP 2026';
+      const grossAmount =
+        parseFloat(rawBooking.total_amount || rawBooking.grossAmount || 0);
+
+      const normalized: HostReservation = {
+        id: rawBooking.id,
+        spotTitle,
+        driverName,
+        vehiclePlate,
+        timeWindow: rawBooking.timeWindow || 'Session in Progress',
+        grossAmount: grossAmount > 0 ? grossAmount : 160,
+        status: mappedStatus,
+        escrowStatus,
+      };
+
+      setReservations((prev) => {
+        const index = prev.findIndex((r) => r.id === normalized.id);
+        if (index >= 0) {
+          // Transition existing reservation across UI tabs in-place
+          const updated = [...prev];
+          updated[index] = { ...updated[index], ...normalized };
+          return updated;
+        }
+        // Dynamically prepend new incoming reservation
+        return [normalized, ...prev];
+      });
+
+      setLiveBanner(`Live update: ${spotTitle} is now ${mappedStatus.toUpperCase()}`);
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          setLiveBanner(null);
+        }
+      }, 5000);
+    };
+
+    const unsubscribe = onBookingUpdated(handleBookingUpdated);
+
+    return () => {
+      isMountedRef.current = false;
+      unsubscribe();
+    };
+  }, [userToken]);
+
+  const filtered = reservations.filter((r) => {
     if (filter === 'active') return r.status === 'active' || r.status === 'upcoming';
     if (filter === 'completed') return r.status === 'completed';
     return true;
@@ -71,6 +146,16 @@ export const HostReservationsScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
       <Header title="Driver Bookings" subtitle="Live occupant activity and payouts" />
+
+      {/* Real-time WebSocket Event Notification Banner */}
+      {liveBanner && (
+        <View style={styles.liveBanner} testID="host-live-banner">
+          <Ionicons name="flash" size={14} color="#00F5FF" style={{ marginRight: 6 }} />
+          <Text style={styles.liveBannerText} numberOfLines={1}>
+            {liveBanner}
+          </Text>
+        </View>
+      )}
 
       <ScrollView
         style={styles.container}
@@ -259,5 +344,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  liveBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 245, 255, 0.1)',
+    borderBottomWidth: 1,
+    borderColor: 'rgba(0, 245, 255, 0.3)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  liveBannerText: {
+    color: '#00F5FF',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
 });
