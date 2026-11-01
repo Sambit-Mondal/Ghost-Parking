@@ -7,6 +7,21 @@ export interface FetchNearbySpotsParams {
   limit?: number;
 }
 
+export interface CreateSpotPayload {
+  title: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  hourly_rate: number;
+  is_active?: boolean;
+}
+
+export interface CreateSpotResponse {
+  success: boolean;
+  spot?: any;
+  error?: string;
+}
+
 export interface SpotsApiResponse {
   success: boolean;
   spots: ParkingSpotData[];
@@ -170,4 +185,99 @@ async function fetchDirectSpotsFallback(baseUrl: string): Promise<SpotsApiRespon
     source: 'fallback_cache',
     error: 'All backend gateway endpoints unavailable',
   };
+}
+
+/**
+ * Creates a new parking spot on the Express Gateway with exact PostGIS coordinates.
+ */
+export async function createSpot(
+  payload: CreateSpotPayload,
+  token?: string | null
+): Promise<CreateSpotResponse> {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${API_ENDPOINTS.SPOTS_DIRECT}`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'x-client': 'ghost-parking-mobile',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.error || `Failed to create spot (Status ${response.status})`,
+      };
+    }
+
+    return {
+      success: true,
+      spot: data.spot,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Network request failed',
+    };
+  }
+}
+
+/**
+ * Pauses or reactivates a parking spot listing via PATCH /spots/:id/pause
+ */
+export async function toggleSpotPause(
+  spotId: string,
+  isActive: boolean,
+  token?: string | null
+): Promise<{ success: boolean; spot?: any; error?: string }> {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/spots/${spotId}/pause`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'x-client': 'ghost-parking-mobile',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ is_active: isActive }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.error || `Failed to update spot status (${response.status})`,
+      };
+    }
+
+    return {
+      success: true,
+      spot: data.spot,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Network request failed',
+    };
+  }
 }
