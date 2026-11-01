@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const { emitBookingUpdated } = require('../lib/socket');
 
 const VALID_STATUSES = ['pending', 'active', 'completed', 'cancelled', 'disputed'];
 
@@ -74,10 +75,13 @@ router.post('/', async (req, res, next) => {
           select: { id: true, name: true, email: true, phone_number: true },
         },
         spot: {
-          select: { id: true, title: true, address: true, hourly_rate: true },
+          select: { id: true, title: true, address: true, hourly_rate: true, host_id: true },
         },
       },
     });
+
+    // Targeted emission to driver and host private rooms
+    emitBookingUpdated(booking, booking.driver_id, booking.spot?.host_id);
 
     return res.status(201).json({
       message: 'Booking created successfully',
@@ -181,7 +185,18 @@ router.patch('/:id/status', async (req, res, next) => {
     const updatedBooking = await prisma.bookings.update({
       where: { id },
       data: { status },
+      include: {
+        driver: {
+          select: { id: true, name: true, email: true, phone_number: true },
+        },
+        spot: {
+          select: { id: true, title: true, address: true, hourly_rate: true, host_id: true },
+        },
+      },
     });
+
+    // Targeted emission to driver and host private rooms
+    emitBookingUpdated(updatedBooking, updatedBooking.driver_id, updatedBooking.spot?.host_id);
 
     return res.json({
       message: `Booking status updated to ${status}`,
@@ -215,7 +230,18 @@ router.post('/:id/cancel', async (req, res, next) => {
     const cancelledBooking = await prisma.bookings.update({
       where: { id },
       data: { status: 'cancelled' },
+      include: {
+        driver: {
+          select: { id: true, name: true, email: true, phone_number: true },
+        },
+        spot: {
+          select: { id: true, title: true, address: true, hourly_rate: true, host_id: true },
+        },
+      },
     });
+
+    // Targeted emission to driver and host private rooms
+    emitBookingUpdated(cancelledBooking, cancelledBooking.driver_id, cancelledBooking.spot?.host_id);
 
     return res.json({
       message: 'Booking cancelled successfully',
@@ -246,7 +272,7 @@ router.post('/check-in', async (req, res, next) => {
         where: { id: booking_id },
         include: {
           driver: { select: { id: true, name: true, email: true } },
-          spot: { select: { id: true, title: true, address: true, hourly_rate: true } },
+          spot: { select: { id: true, title: true, address: true, hourly_rate: true, host_id: true } },
         },
       });
     }
@@ -266,9 +292,12 @@ router.post('/check-in', async (req, res, next) => {
         },
         include: {
           driver: { select: { id: true, name: true, email: true } },
-          spot: { select: { id: true, title: true, address: true, hourly_rate: true } },
+          spot: { select: { id: true, title: true, address: true, hourly_rate: true, host_id: true } },
         },
       });
+
+      // Targeted emission to driver and host private rooms
+      emitBookingUpdated(updatedBooking, updatedBooking.driver_id, updatedBooking.spot?.host_id);
 
       return res.json({
         message: 'Check-in successful. Parking session activated.',
@@ -279,16 +308,12 @@ router.post('/check-in', async (req, res, next) => {
     }
 
     // If not found in DB (e.g. mock booking ID or demo session), return demo active session
-    return res.json({
-      message: 'Check-in successful. Parking session activated.',
-      booking: {
-        id: booking_id,
-        status: 'active',
-        checked_in_at: new Date().toISOString(),
-      },
-      check_in_time: new Date().toISOString(),
-      distance_meters: distance_meters ?? null,
-    });
+    const demoBooking = {
+      id: booking_id,
+      status: 'active',
+      checked_in_at: new Date().toISOString(),
+    };
+    emitBookingUpdated(demoBooking);
   } catch (error) {
     next(error);
   }
