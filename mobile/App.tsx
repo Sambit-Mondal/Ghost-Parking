@@ -6,7 +6,18 @@ import { AuthProvider } from './src/context/AuthContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import './global.css';
 
-// Silence third-party CSS interop deprecation warning
+// Silence third-party NativeWind / CSS interop ImageBackground deprecation warning from terminal and LogBox
+const originalWarn = console.warn;
+console.warn = (...args: any[]) => {
+  if (
+    typeof args[0] === 'string' &&
+    args[0].includes('ImageBackground is deprecated')
+  ) {
+    return;
+  }
+  originalWarn(...args);
+};
+
 LogBox.ignoreLogs([
   'ImageBackground is deprecated',
 ]);
