@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   StatusBar,
   ActivityIndicator,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
@@ -23,7 +24,8 @@ import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { formatCurrency, calculateHostSplit } from '../../utils/formatting';
 import { useAuth } from '../../context/AuthContext';
-import { createSpot, toggleSpotPause } from '../../services/spotService';
+import { createSpot, toggleSpotPause, fetchMySpots } from '../../services/spotService';
+import { connectSocket, onSpotAdded, onSpotUpdated } from '../../services/socketService';
 
 export const DEFAULT_HOST_COORDS = {
   latitude: 12.9716,
@@ -116,40 +118,13 @@ export interface HostListingItem {
   lifetime_earnings: number;
 }
 
-export const INITIAL_HOST_LISTINGS: HostListingItem[] = [
-  {
-    id: 'spot-host-01',
-    title: 'MG Road Metro Hub Parking',
-    address: 'Near Trinity Metro Station, MG Road, Bengaluru',
-    hourly_rate: 80,
-    is_active: true,
-    total_bookings: 84,
-    lifetime_earnings: 20160,
-  },
-  {
-    id: 'spot-host-02',
-    title: 'Indiranagar 100ft Rd Garage',
-    address: '12th Main Rd, HAL 2nd Stage, Indiranagar',
-    hourly_rate: 120,
-    is_active: true,
-    total_bookings: 42,
-    lifetime_earnings: 15120,
-  },
-  {
-    id: 'spot-host-03',
-    title: 'Koramangala Tech Park Bay',
-    address: '4th Block, 80 Feet Rd, Koramangala',
-    hourly_rate: 60,
-    is_active: false,
-    total_bookings: 29,
-    lifetime_earnings: 6960,
-  },
-];
-
 export const HostListingsScreen: React.FC = () => {
   const { userToken } = useAuth();
-  const [listings, setListings] = useState<HostListingItem[]>(INITIAL_HOST_LISTINGS);
+  const [listings, setListings] = useState<HostListingItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
+  const isMountedRef = useRef(true);
 
   // New Spot Form State
   const [newTitle, setNewTitle] = useState('');
@@ -166,7 +141,68 @@ export const HostListingsScreen: React.FC = () => {
 
   const mapRef = useRef<MapView | null>(null);
 
-  const totalEarnings = listings.reduce((sum, spot) => sum + spot.lifetime_earnings, 0);
+  /**
+   * Fetches live user-scoped spots owned by the authenticated host via GET /spots/me
+   */
+  const loadMySpots = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setIsRefreshing(true);
+    else setIsLoading(true);
+
+    try {
+      const res = await fetchMySpots(userToken);
+      if (isMountedRef.current && res.success && Array.isArray(res.spots)) {
+        setListings(res.spots);
+      }
+    } catch {
+      // Keep existing state
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    }
+  }, [userToken]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    loadMySpots();
+
+    // Attach real-time WebSocket listeners
+    connectSocket({ token: userToken });
+
+    const unsubAdded = onSpotAdded((rawSpot: any) => {
+      if (!isMountedRef.current || !rawSpot?.id) return;
+      setListings((prev) => {
+        const exists = prev.some((s) => s.id === rawSpot.id);
+        if (exists) return prev;
+        const newListing: HostListingItem = {
+          id: rawSpot.id,
+          title: rawSpot.title,
+          address: rawSpot.address,
+          hourly_rate: parseFloat(rawSpot.hourly_rate || 80),
+          is_active: rawSpot.is_active !== undefined ? Boolean(rawSpot.is_active) : true,
+          total_bookings: 0,
+          lifetime_earnings: 0,
+        };
+        return [newListing, ...prev];
+      });
+    });
+
+    const unsubUpdated = onSpotUpdated((data: { id: string; is_active: boolean; [key: string]: any }) => {
+      if (!isMountedRef.current || !data?.id) return;
+      setListings((prev) =>
+        prev.map((s) => (s.id === data.id ? { ...s, is_active: data.is_active } : s))
+      );
+    });
+
+    return () => {
+      isMountedRef.current = false;
+      unsubAdded();
+      unsubUpdated();
+    };
+  }, [userToken, loadMySpots]);
+
+  const totalEarnings = listings.reduce((sum, spot) => sum + (spot.lifetime_earnings || 0), 0);
   const { hostShare } = calculateHostSplit(totalEarnings);
   const activeCount = listings.filter((l) => l.is_active).length;
 
@@ -321,6 +357,14 @@ export const HostListingsScreen: React.FC = () => {
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => loadMySpots(true)}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         {/* KPI Section */}
         <View style={styles.kpiRow}>
@@ -370,50 +414,65 @@ export const HostListingsScreen: React.FC = () => {
         </View>
 
         {/* Listings List */}
-        {listings.map((spot) => {
-          const split = calculateHostSplit(spot.hourly_rate);
-          return (
-            <Card key={spot.id} testID={`listing-card-${spot.id}`} style={styles.listingCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.cardTitleArea}>
-                  <Text style={styles.spotTitle}>{spot.title}</Text>
-                  <Text style={styles.spotAddress}>{spot.address}</Text>
+        {isLoading ? (
+          <View style={styles.loadingContainer} testID="host-listings-loading">
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Fetching your listings...</Text>
+          </View>
+        ) : listings.length === 0 ? (
+          <View style={styles.emptyContainer} testID="host-listings-empty">
+            <Ionicons name="car-outline" size={48} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>No parking spots listed yet</Text>
+            <Text style={styles.emptySubtitle}>
+              Tap the "+ Add Spot" button above to publish your driveway or parking slot to the live network.
+            </Text>
+          </View>
+        ) : (
+          listings.map((spot) => {
+            const split = calculateHostSplit(spot.hourly_rate);
+            return (
+              <Card key={spot.id} testID={`listing-card-${spot.id}`} style={styles.listingCard}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardTitleArea}>
+                    <Text style={styles.spotTitle}>{spot.title}</Text>
+                    <Text style={styles.spotAddress}>{spot.address}</Text>
+                  </View>
+
+                  <View style={styles.switchWrapper}>
+                    <Text style={styles.switchLabel}>
+                      {spot.is_active ? 'Available' : 'Paused'}
+                    </Text>
+                    <Switch
+                      testID={`switch-${spot.id}`}
+                      value={spot.is_active}
+                      onValueChange={() => toggleListingActive(spot.id)}
+                      trackColor={{ false: colors.border, true: 'rgba(6, 182, 212, 0.5)' }}
+                      thumbColor={spot.is_active ? colors.primary : colors.textMuted}
+                    />
+                  </View>
                 </View>
 
-                <View style={styles.switchWrapper}>
-                  <Text style={styles.switchLabel}>
-                    {spot.is_active ? 'Available' : 'Paused'}
-                  </Text>
-                  <Switch
-                    testID={`switch-${spot.id}`}
-                    value={spot.is_active}
-                    onValueChange={() => toggleListingActive(spot.id)}
-                    trackColor={{ false: colors.border, true: 'rgba(6, 182, 212, 0.5)' }}
-                    thumbColor={spot.is_active ? colors.primary : colors.textMuted}
-                  />
+                {/* Pricing & Split Breakdown */}
+                <View style={styles.splitBox}>
+                  <View style={styles.splitItem}>
+                    <Text style={styles.splitLabel}>Driver Pays</Text>
+                    <Text style={styles.splitRate}>{formatCurrency(spot.hourly_rate)}/hr</Text>
+                  </View>
+                  <View style={styles.splitDivider} />
+                  <View style={styles.splitItem}>
+                    <Text style={styles.splitLabel}>You Earn (80%)</Text>
+                    <Text style={styles.splitPayout}>{formatCurrency(split.hostShare)}/hr</Text>
+                  </View>
+                  <View style={styles.splitDivider} />
+                  <View style={styles.splitItem}>
+                    <Text style={styles.splitLabel}>Bookings</Text>
+                    <Text style={styles.splitStat}>{spot.total_bookings}</Text>
+                  </View>
                 </View>
-              </View>
-
-              {/* Pricing & Split Breakdown */}
-              <View style={styles.splitBox}>
-                <View style={styles.splitItem}>
-                  <Text style={styles.splitLabel}>Driver Pays</Text>
-                  <Text style={styles.splitRate}>{formatCurrency(spot.hourly_rate)}/hr</Text>
-                </View>
-                <View style={styles.splitDivider} />
-                <View style={styles.splitItem}>
-                  <Text style={styles.splitLabel}>You Earn (80%)</Text>
-                  <Text style={styles.splitPayout}>{formatCurrency(split.hostShare)}/hr</Text>
-                </View>
-                <View style={styles.splitDivider} />
-                <View style={styles.splitItem}>
-                  <Text style={styles.splitLabel}>Bookings</Text>
-                  <Text style={styles.splitStat}>{spot.total_bookings}</Text>
-                </View>
-              </View>
-            </Card>
-          );
-        })}
+              </Card>
+            );
+          })
+        )}
       </ScrollView>
 
       {/* Add Spot Modal */}
@@ -865,5 +924,41 @@ const styles = StyleSheet.create({
   previewText: {
     fontSize: 12,
     color: colors.primary,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+  },
+  loadingText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 12,
+    fontWeight: '500',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    marginVertical: 12,
+  },
+  emptyTitle: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 18,
   },
 });
