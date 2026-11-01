@@ -22,7 +22,8 @@ import { DriverMapView } from '../../components/driver/DriverMapView';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { formatCurrency } from '../../utils/formatting';
-import { fetchNearbySpots } from '../../services/spotService';
+import { fetchNearbySpots, normalizeSpot } from '../../services/spotService';
+import { connectSocket, onSpotAdded, onSpotUpdated } from '../../services/socketService';
 import {
   createPaymentOrder,
   openRazorpayCheckout,
@@ -106,6 +107,7 @@ export const DriverMapScreen: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dataSource, setDataSource] = useState<string>('Go PostGIS Engine');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [liveSpotBanner, setLiveSpotBanner] = useState<string | null>(null);
 
   const isMountedRef = useRef(true);
 
@@ -198,7 +200,83 @@ export const DriverMapScreen: React.FC = () => {
     };
   }, []);
 
+  // Real-time WebSocket listener for live spot availability & status updates
+  useEffect(() => {
+    // Establish connection to Express Gateway WebSocket
+    connectSocket({ token: userToken });
+
+    // 1. Listen for new spots added by hosts (spot_added / new_spot_available)
+    const handleSpotAdded = (rawSpot: any) => {
+      if (!isMountedRef.current || !rawSpot) return;
+
+      const normalized = normalizeSpot(rawSpot);
+
+      if (
+        typeof normalized.latitude !== 'number' ||
+        isNaN(normalized.latitude) ||
+        typeof normalized.longitude !== 'number' ||
+        isNaN(normalized.longitude)
+      ) {
+        return;
+      }
+
+      setSpots((prevSpots) => {
+        const exists = prevSpots.some((s) => s.id === normalized.id);
+        if (exists) {
+          return prevSpots.map((s) => (s.id === normalized.id ? normalized : s));
+        }
+        // State updates using previous state callback correctly:
+        return [normalized, ...prevSpots];
+      });
+
+      setLiveSpotBanner(`New space available: ${normalized.title} (${formatCurrency(normalized.hourly_rate)}/hr)`);
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          setLiveSpotBanner(null);
+        }
+      }, 6000);
+    };
+
+    // 2. Listen for spot status changes (spot_updated, e.g. paused / reopened)
+    const handleSpotUpdated = (updateData: { id: string; is_active: boolean; [key: string]: any }) => {
+      if (!isMountedRef.current || !updateData?.id) return;
+
+      setSpots((prevSpots) => {
+        // Map through existing state and remove the pin if is_active is false
+        if (updateData.is_active === false) {
+          return prevSpots.filter((s) => s.id !== updateData.id);
+        }
+        // If reactivated or updated, update the spot in place
+        return prevSpots.map((s) =>
+          s.id === updateData.id ? { ...s, is_active: true } : s
+        );
+      });
+
+      setLiveSpotBanner(
+        updateData.is_active === false
+          ? 'A nearby parking spot was just paused by its host.'
+          : 'A nearby parking spot was just reopened by its host.'
+      );
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          setLiveSpotBanner(null);
+        }
+      }, 5000);
+    };
+
+    const unsubAdded = onSpotAdded(handleSpotAdded);
+    const unsubUpdated = onSpotUpdated(handleSpotUpdated);
+
+    return () => {
+      unsubAdded();
+      unsubUpdated();
+    };
+  }, [userToken]);
+
   const filteredSpots = spots.filter((spot) => {
+    // Only display active spots on the map
+    if (spot.is_active === false) return false;
+
     const matchesSearch =
       spot.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       spot.address.toLowerCase().includes(searchQuery.toLowerCase());
@@ -363,6 +441,16 @@ export const DriverMapScreen: React.FC = () => {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Real-Time Live Spot Announcement Banner */}
+        {liveSpotBanner && (
+          <View style={styles.liveBanner} testID="live-spot-banner">
+            <Ionicons name="radio" size={16} color={colors.primary} style={{ marginRight: 8 }} />
+            <Text style={styles.liveBannerText} numberOfLines={2}>
+              {liveSpotBanner}
+            </Text>
+          </View>
+        )}
 
         {/* Filter Pills */}
         <ScrollView
@@ -627,6 +715,23 @@ const styles = StyleSheet.create({
   contentContainer: {
     padding: 16,
     paddingBottom: 40,
+  },
+  liveBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 245, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  liveBannerText: {
+    flex: 1,
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
   },
   searchWrapper: {
     flexDirection: 'row',
