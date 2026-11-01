@@ -8,6 +8,33 @@ import { AuthProvider } from '../../src/context/AuthContext';
 // Import mocked socketService to trigger simulated WebSocket broadcasts
 const { __emitMockEvent } = require('../../src/services/socketService');
 
+jest.mock('../../src/services/bookingService', () => {
+  const actual = jest.requireActual('../../src/services/bookingService');
+  return {
+    ...actual,
+    fetchMyBookings: jest.fn(async () => ({
+      success: true,
+      bookings: [
+        {
+          id: 'res_live_772',
+          spot: {
+            title: 'MG Road Metro Hub Parking',
+            address: 'Near Trinity Metro Station, MG Road, Bengaluru',
+            latitude: 12.9716,
+            longitude: 77.5946,
+          },
+          startTime: 'Today, 02:00 PM',
+          endTime: 'Today, 05:00 PM',
+          durationHours: 3,
+          total_amount: 240,
+          status: 'upcoming',
+          spotNumber: 'Bay A-12',
+        },
+      ],
+    })),
+  };
+});
+
 // Spy on Alert.alert
 const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
@@ -23,16 +50,18 @@ describe('Component Test: Driver Check-In Logic', () => {
       </AuthProvider>
     );
 
-  it('renders booking cards with "I have arrived" check-in button', () => {
-    const { getByTestId, getAllByText } = renderScreen();
+  it('renders booking cards with "I have arrived" check-in button', async () => {
+    const { getByTestId, getAllByText, findByTestId } = renderScreen();
 
-    expect(getByTestId('booking-card-res_live_772')).toBeTruthy();
+    expect(await findByTestId('booking-card-res_live_772')).toBeTruthy();
     expect(getByTestId('check-in-btn-res_live_772')).toBeTruthy();
     expect(getAllByText('I have arrived (Check In)').length).toBeGreaterThan(0);
   });
 
   it('throws an error and rejects check-in if the user is further than 50 meters (120m)', async () => {
-    const { getByTestId, findByText } = renderScreen();
+    const { getByTestId, findByText, findByTestId } = renderScreen();
+
+    expect(await findByTestId('booking-card-res_live_772')).toBeTruthy();
 
     // Trigger simulation chip for 120m away (> 50m)
     const farBtn = getByTestId('simulate-far-res_live_772');
@@ -65,7 +94,9 @@ describe('Component Test: Driver Check-In Logic', () => {
       }),
     });
 
-    const { getByTestId, findByText } = renderScreen();
+    const { getByTestId, findByText, findByTestId } = renderScreen();
+
+    expect(await findByTestId('booking-card-res_live_772')).toBeTruthy();
 
     // Trigger simulation chip for 18m away (<= 50m)
     const arrivedBtn = getByTestId('simulate-arrived-res_live_772');
@@ -122,7 +153,9 @@ describe('Component Test: Driver Check-In Logic', () => {
       }),
     });
 
-    const { getByTestId, findByText } = renderScreen();
+    const { getByTestId, findByText, findByTestId } = renderScreen();
+
+    expect(await findByTestId('booking-card-res_live_772')).toBeTruthy();
 
     // Tap live "I have arrived" button
     const checkInBtn = getByTestId('check-in-btn-res_live_772');
@@ -143,7 +176,9 @@ describe('Component Test: Driver Check-In Logic', () => {
       granted: false,
     });
 
-    const { getByTestId, findByText } = renderScreen();
+    const { getByTestId, findByText, findByTestId } = renderScreen();
+
+    expect(await findByTestId('booking-card-res_live_772')).toBeTruthy();
 
     const checkInBtn = getByTestId('check-in-btn-res_live_772');
     fireEvent.press(checkInBtn);
@@ -163,7 +198,10 @@ describe('Component Test: Driver Check-In Logic', () => {
   });
 
   it('updates reservation card in real time when "booking_updated" socket event is received', async () => {
-    const { findByText, getByTestId } = renderScreen();
+    const { findByText, getByTestId, findByTestId } = renderScreen();
+
+    // Wait for initial load to finish before receiving real-time socket event
+    expect(await findByTestId('booking-card-res_live_772')).toBeTruthy();
 
     // Simulate backend payment clearing / host check-in socket broadcast
     act(() => {
@@ -182,6 +220,9 @@ describe('Component Test: Driver Check-In Logic', () => {
 
   it('dynamically prepends new incoming reservation on "booking_updated" socket event', async () => {
     const { findByTestId, findByText } = renderScreen();
+
+    // Wait for initial load to finish before receiving real-time socket event
+    expect(await findByTestId('booking-card-res_live_772')).toBeTruthy();
 
     // Simulate newly created booking via Razorpay checkout
     act(() => {

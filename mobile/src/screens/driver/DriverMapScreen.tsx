@@ -31,64 +31,13 @@ import {
 } from '../../services/paymentService';
 import { useAuth } from '../../context/AuthContext';
 
-export const INITIAL_SPOTS: ParkingSpotData[] = [
-  {
-    id: '4a038134-d6f6-4cff-8e93-a031dc49c32a',
-    title: 'MG Road Metro Hub Parking',
-    address: 'Near Trinity Metro Station, MG Road, Bengaluru',
-    latitude: 12.9716,
-    longitude: 77.5946,
-    hourly_rate: 80,
-    is_active: true,
-    distance_meters: 650,
-    distance_miles: 0.4,
-    available_slots: 3,
-  },
-  {
-    id: 'f9b43626-4957-477c-b1b0-84700120bdf2',
-    title: 'Indiranagar 100ft Rd Garage',
-    address: '12th Main Rd, HAL 2nd Stage, Indiranagar',
-    latitude: 12.9784,
-    longitude: 77.6408,
-    hourly_rate: 120,
-    is_active: true,
-    distance_meters: 1900,
-    distance_miles: 1.2,
-    available_slots: 1,
-  },
-  {
-    id: 'aa074775-207e-473c-9d70-b61396f6abb4',
-    title: 'Koramangala Tech Park Bay',
-    address: '4th Block, 80 Feet Rd, Koramangala',
-    latitude: 12.9352,
-    longitude: 77.6245,
-    hourly_rate: 60,
-    is_active: true,
-    distance_meters: 3400,
-    distance_miles: 2.1,
-    available_slots: 5,
-  },
-  {
-    id: '7cae0f87-775d-49aa-bb38-afbbbd6d0c32',
-    title: 'Church Street Underground Bay',
-    address: 'Church St, Shanthala Nagar, Ashok Nagar',
-    latitude: 12.9753,
-    longitude: 77.6015,
-    hourly_rate: 150,
-    is_active: false,
-    distance_meters: 1100,
-    distance_miles: 0.7,
-    available_slots: 0,
-  },
-];
-
 export const DriverMapScreen: React.FC = () => {
   const { user, userToken } = useAuth();
 
-  const [spots, setSpots] = useState<ParkingSpotData[]>(INITIAL_SPOTS);
+  const [spots, setSpots] = useState<ParkingSpotData[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'affordable' | 'nearby'>('all');
-  const [selectedSpot, setSelectedSpot] = useState<ParkingSpotData | null>(INITIAL_SPOTS[0]);
+  const [selectedSpot, setSelectedSpot] = useState<ParkingSpotData | null>(null);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const handleSelectSpot = useCallback((spot: ParkingSpotData) => {
@@ -186,14 +135,10 @@ export const DriverMapScreen: React.FC = () => {
         // Fallback to default coordinates
       }
 
-      if (process.env.NODE_ENV !== 'test') {
-        loadSpots(false, coords);
-      }
+      loadSpots(false, coords);
     };
 
-    if (process.env.NODE_ENV !== 'test') {
-      initGPS();
-    }
+    initGPS();
 
     return () => {
       isMountedRef.current = false;

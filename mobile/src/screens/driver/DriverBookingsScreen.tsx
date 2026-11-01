@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   StatusBar,
   Alert,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -18,7 +19,7 @@ import { Badge } from '../../components/common/Badge';
 import { Card } from '../../components/common/Card';
 import { formatCurrency } from '../../utils/formatting';
 import { isWithinCheckInRadius, createOffsetCoordinate } from '../../utils/geo';
-import { checkInBooking } from '../../services/bookingService';
+import { checkInBooking, fetchMyBookings } from '../../services/bookingService';
 import { useAuth } from '../../context/AuthContext';
 import { connectSocket, onBookingUpdated } from '../../services/socketService';
 
@@ -40,58 +41,11 @@ export interface BookingItem {
   distanceAtCheckIn?: number;
 }
 
-export const INITIAL_BOOKINGS: BookingItem[] = [
-  {
-    id: 'res_live_772',
-    spotTitle: 'MG Road Metro Hub Parking',
-    address: 'Near Trinity Metro Station, MG Road, Bengaluru',
-    latitude: 12.9716,
-    longitude: 77.5946,
-    startTime: 'Today, 02:00 PM',
-    endTime: 'Today, 05:00 PM',
-    durationHours: 3,
-    totalAmount: 240,
-    status: 'upcoming',
-    escrowStatus: 'held',
-    spotNumber: 'Bay A-12',
-    checkedIn: false,
-  },
-  {
-    id: 'res_up_381',
-    spotTitle: 'Indiranagar 100ft Rd Garage',
-    address: '12th Main Rd, HAL 2nd Stage, Indiranagar',
-    latitude: 12.9784,
-    longitude: 77.6408,
-    startTime: 'Tomorrow, 10:00 AM',
-    endTime: 'Tomorrow, 12:00 PM',
-    durationHours: 2,
-    totalAmount: 240,
-    status: 'upcoming',
-    escrowStatus: 'held',
-    spotNumber: 'Bay C-04',
-    checkedIn: false,
-  },
-  {
-    id: 'res_past_904',
-    spotTitle: 'Koramangala Tech Park Bay',
-    address: '4th Block, 80 Feet Rd, Koramangala',
-    latitude: 12.9352,
-    longitude: 77.6245,
-    startTime: 'Yesterday, 09:00 AM',
-    endTime: 'Yesterday, 01:00 PM',
-    durationHours: 4,
-    totalAmount: 240,
-    status: 'completed',
-    escrowStatus: 'released',
-    spotNumber: 'Bay B-08',
-    checkedIn: true,
-    checkedInAt: '09:02 AM',
-  },
-];
-
 export const DriverBookingsScreen: React.FC = () => {
   const { userToken } = useAuth();
-  const [bookings, setBookings] = useState<BookingItem[]>(INITIAL_BOOKINGS);
+  const [bookings, setBookings] = useState<BookingItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
   const [liveBanner, setLiveBanner] = useState<string | null>(null);
   const [checkingInId, setCheckingInId] = useState<string | null>(null);
@@ -103,9 +57,83 @@ export const DriverBookingsScreen: React.FC = () => {
   } | null>(null);
   const isMountedRef = useRef(true);
 
+  const loadBookings = useCallback(
+    async (isRefresh = false) => {
+      if (isRefresh) setIsRefreshing(true);
+      else setIsLoading(true);
+
+      try {
+        const res = await fetchMyBookings(userToken);
+        if (isMountedRef.current && res.success && Array.isArray(res.bookings)) {
+          const normalizedList: BookingItem[] = res.bookings.map((b: any) => {
+            const mappedStatus: 'active' | 'upcoming' | 'completed' =
+              b.status === 'completed'
+                ? 'completed'
+                : b.status === 'active'
+                ? 'active'
+                : b.status === 'cancelled'
+                ? 'completed'
+                : 'upcoming';
+
+            const escrowStatus: 'held' | 'released' | 'refunded' =
+              b.status === 'completed'
+                ? 'released'
+                : b.status === 'cancelled'
+                ? 'refunded'
+                : 'held';
+
+            const spotTitle = b.spot?.title || b.spotTitle || 'Reserved Parking Bay';
+            const address = b.spot?.address || b.address || 'Bengaluru, KA';
+            const latitude = b.spot?.latitude || b.latitude || 12.9716;
+            const longitude = b.spot?.longitude || b.longitude || 77.5946;
+            const totalAmount = parseFloat(b.total_amount || b.totalAmount || 0);
+
+            const startTime = b.start_time
+              ? 'Today, ' +
+                new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : 'Today, 10:00 AM';
+            const endTime = b.end_time
+              ? 'Today, ' +
+                new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : 'Today, 12:00 PM';
+
+            return {
+              id: b.id,
+              spotTitle,
+              address,
+              latitude: Number(latitude),
+              longitude: Number(longitude),
+              startTime,
+              endTime,
+              durationHours: 2,
+              totalAmount: totalAmount > 0 ? totalAmount : 160,
+              status: mappedStatus,
+              escrowStatus,
+              spotNumber: b.spotNumber || 'Bay A-01',
+              checkedIn: mappedStatus === 'active',
+              checkedInAt: b.checked_in_at
+                ? new Date(b.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : undefined,
+            };
+          });
+          setBookings(normalizedList);
+        }
+      } catch {
+        // Keep existing state
+      } finally {
+        if (isMountedRef.current) {
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
+      }
+    },
+    [userToken]
+  );
+
   // WebSocket listener for real-time reservation updates
   useEffect(() => {
     isMountedRef.current = true;
+    loadBookings();
 
     // Connect socket with driver JWT so it joins room_user_{id}
     connectSocket({ token: userToken });
@@ -185,7 +213,7 @@ export const DriverBookingsScreen: React.FC = () => {
       isMountedRef.current = false;
       unsubscribe();
     };
-  }, [userToken]);
+  }, [userToken, loadBookings]);
 
   const filteredBookings = bookings.filter((b) => {
     if (filter === 'active') return b.status === 'active' || b.status === 'upcoming';
@@ -353,6 +381,14 @@ export const DriverBookingsScreen: React.FC = () => {
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => loadBookings(true)}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         {/* Filter Tabs */}
         <View style={styles.tabContainer}>
@@ -383,7 +419,19 @@ export const DriverBookingsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {filteredBookings.map((booking) => {
+        {isLoading ? (
+          <View style={styles.loadingContainer} testID="driver-bookings-loading">
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Fetching your reservations...</Text>
+          </View>
+        ) : filteredBookings.length === 0 ? (
+          <View style={styles.emptyView} testID="driver-bookings-empty">
+            <Ionicons name="receipt-outline" size={40} color={colors.textMuted} style={{ marginBottom: 12 }} />
+            <Text style={styles.emptyTitle}>No reservations found</Text>
+            <Text style={styles.emptySubtitle}>You have no parking sessions in this view.</Text>
+          </View>
+        ) : (
+          filteredBookings.map((booking) => {
           const isCheckingIn = checkingInId === booking.id;
           const statusRecord = checkInStatus?.bookingId === booking.id ? checkInStatus : null;
 
@@ -526,15 +574,8 @@ export const DriverBookingsScreen: React.FC = () => {
               </View>
             </Card>
           );
-        })}
-
-        {filteredBookings.length === 0 && (
-          <View style={styles.emptyView}>
-            <Ionicons name="receipt-outline" size={40} color={colors.textMuted} style={{ marginBottom: 12 }} />
-            <Text style={styles.emptyTitle}>No reservations found</Text>
-            <Text style={styles.emptySubtitle}>You have no parking sessions in this view.</Text>
-          </View>
-        )}
+        })
+      )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -803,5 +844,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     flex: 1,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+  },
+  loadingText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 12,
+    fontWeight: '500',
   },
 });
