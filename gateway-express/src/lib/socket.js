@@ -1,5 +1,6 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../middleware/auth');
 
 let io = null;
 
@@ -29,10 +30,7 @@ function initSocket(httpServer) {
 
     if (token) {
       try {
-        const decoded = jwt.verify(
-          token,
-          process.env.JWT_SECRET || 'ghost_parking_jwt_secret_key_2026'
-        );
+        const decoded = jwt.verify(token, JWT_SECRET);
         socket.user = decoded;
       } catch (err) {
         console.warn('[Socket Auth] Unverified client connected:', err.message);
@@ -42,13 +40,22 @@ function initSocket(httpServer) {
   });
 
   io.on('connection', (socket) => {
-    const userId = socket.user?.id || 'anonymous';
+    const userId = socket.user?.id;
     const role = socket.user?.role || 'driver';
-    console.log(`[Socket.io] Client connected: ${socket.id} (user: ${userId}, role: ${role})`);
+    console.log(`[Socket.io] Client connected: ${socket.id} (user: ${userId || 'anonymous'}, role: ${role})`);
 
-    // Drivers can join a room for driver-specific broadcasts if needed
+    // Join private socket room based on decoded JWT user ID
+    if (userId) {
+      const userRoom = `room_user_${userId}`;
+      socket.join(userRoom);
+      console.log(`[Socket.io] Socket ${socket.id} joined private room: ${userRoom}`);
+    }
+
+    // Role-specific rooms for general announcements
     if (role === 'driver') {
       socket.join('drivers');
+    } else if (role === 'host') {
+      socket.join('hosts');
     }
 
     socket.on('disconnect', (reason) => {
@@ -65,6 +72,39 @@ function initSocket(httpServer) {
  */
 function getIO() {
   return io;
+}
+
+/**
+ * Emits 'booking_updated' exclusively to targeted private user rooms (driver and host).
+ * Includes the full updated booking object in the payload.
+ *
+ * @param {Object} booking - Full updated booking object
+ * @param {string} [driverId] - Optional explicit driver user ID
+ * @param {string} [hostId] - Optional explicit host user ID
+ */
+function emitBookingUpdated(booking, driverId, hostId) {
+  if (!io || !booking) return;
+
+  const targetDriverId = driverId || booking.driver_id || booking.driver?.id;
+  const targetHostId =
+    hostId ||
+    booking.host_id ||
+    booking.spot?.host_id ||
+    booking.spot?.host?.id;
+
+  console.log(`[Socket.io] Targeted emit 'booking_updated' for booking ${booking.id} (status: ${booking.status})`);
+
+  if (targetDriverId) {
+    const driverRoom = `room_user_${targetDriverId}`;
+    io.to(driverRoom).emit('booking_updated', booking);
+    console.log(`[Socket.io] -> Emitted 'booking_updated' to driver room: ${driverRoom}`);
+  }
+
+  if (targetHostId) {
+    const hostRoom = `room_user_${targetHostId}`;
+    io.to(hostRoom).emit('booking_updated', booking);
+    console.log(`[Socket.io] -> Emitted 'booking_updated' to host room: ${hostRoom}`);
+  }
 }
 
 /**
@@ -95,6 +135,7 @@ function broadcastSpotUpdated(data) {
 module.exports = {
   initSocket,
   getIO,
+  emitBookingUpdated,
   broadcastSpotAdded,
   broadcastNewSpot: broadcastSpotAdded,
   broadcastSpotUpdated,
