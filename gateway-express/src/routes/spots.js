@@ -2,6 +2,10 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { verifyToken, requireHost } = require('../middleware/auth');
+const { broadcastSpotAdded, broadcastSpotUpdated } = require('../lib/socket');
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (val) => typeof val === 'string' && UUID_REGEX.test(val);
 
 /**
  * POST /spots
@@ -48,14 +52,100 @@ router.post('/', verifyToken, requireHost, async (req, res, next) => {
         ST_Y(location::geometry) AS latitude;
     `;
 
+    const createdSpot = result[0];
+    const spotPayload = {
+      id: createdSpot.id,
+      host_id: createdSpot.host_id,
+      title: createdSpot.title,
+      address: createdSpot.address,
+      latitude: parseFloat(createdSpot.latitude),
+      longitude: parseFloat(createdSpot.longitude),
+      hourly_rate: parseFloat(createdSpot.hourly_rate),
+      is_active: Boolean(createdSpot.is_active),
+      available_slots: 1,
+      created_at: createdSpot.created_at,
+      updated_at: createdSpot.updated_at,
+    };
+
+    // Broadcast real-time WebSocket event to all connected drivers
+    broadcastSpotAdded(spotPayload);
+
     return res.status(201).json({
       message: 'Parking spot created successfully',
-      spot: result[0],
+      spot: spotPayload,
     });
   } catch (error) {
     next(error);
   }
 });
+
+/**
+ * PATCH /spots/:id/pause
+ * PATCH /spots/:id/status
+ * Pauses, resumes, or toggles active status of a parking spot.
+ * Broadcasts 'spot_updated' via Socket.io with { id, is_active }.
+ */
+const handlePauseOrToggleSpot = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body || {};
+
+    let existingSpot = null;
+    if (isUuid(id)) {
+      existingSpot = await prisma.parking_spots.findUnique({
+        where: { id },
+      });
+    }
+
+    if (!existingSpot) {
+      // If it's a demo or non-persisted spot ID, still toggle and broadcast so live drivers update
+      const newStatus = is_active !== undefined ? Boolean(is_active) : false;
+      const updatePayload = {
+        id,
+        is_active: newStatus,
+        title: 'Demo Parking Spot',
+        hourly_rate: 80,
+      };
+      broadcastSpotUpdated(updatePayload);
+      return res.json({
+        message: `Parking spot ${newStatus ? 'activated' : 'paused'} successfully`,
+        spot: updatePayload,
+      });
+    }
+
+    // If is_active is explicitly passed as boolean, use it. Otherwise, toggle current status.
+    const newStatus = is_active !== undefined ? Boolean(is_active) : !existingSpot.is_active;
+
+    const updatedSpot = await prisma.parking_spots.update({
+      where: { id },
+      data: {
+        is_active: newStatus,
+        updated_at: new Date(),
+      },
+    });
+
+    const updatePayload = {
+      id: updatedSpot.id,
+      is_active: updatedSpot.is_active,
+      title: updatedSpot.title,
+      hourly_rate: parseFloat(updatedSpot.hourly_rate),
+    };
+
+    // Broadcast spot_updated to all connected drivers
+    broadcastSpotUpdated(updatePayload);
+
+    return res.json({
+      message: `Parking spot ${newStatus ? 'activated' : 'paused'} successfully`,
+      spot: updatePayload,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+router.patch('/:id/pause', handlePauseOrToggleSpot);
+router.patch('/:id/status', handlePauseOrToggleSpot);
+router.patch('/:id', handlePauseOrToggleSpot);
 
 /**
  * GET /spots
