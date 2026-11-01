@@ -35,11 +35,67 @@ jest.mock('expo-location', () => ({
       speed: 0,
     },
   })),
+  reverseGeocodeAsync: jest.fn(async () => [
+    {
+      name: 'MG Road Metro Station',
+      street: 'MG Road',
+      district: 'Central',
+      city: 'Bengaluru',
+      region: 'Karnataka',
+      country: 'India',
+    },
+  ]),
   Accuracy: {
     Balanced: 3,
     High: 4,
   },
 }));
+
+// Mock socketService for mobile Jest tests
+jest.mock('./src/services/socketService', () => {
+  const listeners = new Map();
+  return {
+    connectSocket: jest.fn(() => ({
+      connected: true,
+      on: jest.fn((event, cb) => {
+        listeners.set(event, cb);
+      }),
+      off: jest.fn((event) => {
+        listeners.delete(event);
+      }),
+      emit: jest.fn(),
+      disconnect: jest.fn(),
+    })),
+    onNewSpotAvailable: jest.fn((cb) => {
+      listeners.set('new_spot_available', cb);
+      listeners.set('spot_added', cb);
+      return () => {
+        listeners.delete('new_spot_available');
+        listeners.delete('spot_added');
+      };
+    }),
+    onSpotAdded: jest.fn((cb) => {
+      listeners.set('spot_added', cb);
+      listeners.set('new_spot_available', cb);
+      return () => {
+        listeners.delete('spot_added');
+        listeners.delete('new_spot_available');
+      };
+    }),
+    onSpotUpdated: jest.fn((cb) => {
+      listeners.set('spot_updated', cb);
+      return () => {
+        listeners.delete('spot_updated');
+      };
+    }),
+    disconnectSocket: jest.fn(),
+    getSocket: jest.fn(() => null),
+    __emitMockEvent: (event, data) => {
+      const cb = listeners.get(event);
+      if (cb) cb(data);
+    },
+  };
+});
 
 // Mock react-native-safe-area-context
 jest.mock('react-native-safe-area-context', () => {
