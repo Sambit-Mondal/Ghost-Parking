@@ -1,7 +1,8 @@
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import { HostListingsScreen } from '../../src/screens/host/HostListingsScreen';
 import { AuthProvider } from '../../src/context/AuthContext';
+import * as Location from 'expo-location';
 
 describe('Component Test: HostListingsScreen', () => {
   const renderScreen = () =>
@@ -30,7 +31,35 @@ describe('Component Test: HostListingsScreen', () => {
     expect(switchEl.props.value).toBe(false);
   });
 
-  it('opens Add Spot modal and adds a new parking space', () => {
+  it('opens Add Spot modal and renders interactive pin-drop map with coordinates', () => {
+    const { getByTestId } = renderScreen();
+
+    const addBtn = getByTestId('add-spot-button');
+    fireEvent.press(addBtn);
+
+    expect(getByTestId('add-spot-modal')).toBeTruthy();
+    expect(getByTestId('host-pin-map')).toBeTruthy();
+    expect(getByTestId('host-draggable-pin')).toBeTruthy();
+    expect(getByTestId('use-current-location-btn')).toBeTruthy();
+    expect(getByTestId('selected-coords-display')).toBeTruthy();
+  });
+
+  it('allows host to tap Use Current Location to fetch GPS driveway coordinates', async () => {
+    const { getByTestId } = renderScreen();
+
+    const addBtn = getByTestId('add-spot-button');
+    fireEvent.press(addBtn);
+
+    const gpsBtn = getByTestId('use-current-location-btn');
+    await act(async () => {
+      fireEvent.press(gpsBtn);
+    });
+
+    expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalled();
+    expect(Location.getCurrentPositionAsync).toHaveBeenCalled();
+  });
+
+  it('opens Add Spot modal and adds a new parking space with coordinates', async () => {
     const { getByTestId, getByText } = renderScreen();
 
     const addBtn = getByTestId('add-spot-button');
@@ -47,9 +76,13 @@ describe('Component Test: HostListingsScreen', () => {
     fireEvent.changeText(addressInput, 'ITPB Main Road, Whitefield');
     fireEvent.changeText(rateInput, '90');
 
-    fireEvent.press(submitBtn);
+    await act(async () => {
+      fireEvent.press(submitBtn);
+    });
 
-    expect(getByText('Whitefield Secure Bay')).toBeTruthy();
-    expect(getByText('ITPB Main Road, Whitefield')).toBeTruthy();
+    await waitFor(() => {
+      expect(getByText('Whitefield Secure Bay')).toBeTruthy();
+      expect(getByText('ITPB Main Road, Whitefield')).toBeTruthy();
+    });
   });
 });
