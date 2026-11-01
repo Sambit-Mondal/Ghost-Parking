@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "@types/react-native-razorpay": "^2.2.6"
+  }
+}
