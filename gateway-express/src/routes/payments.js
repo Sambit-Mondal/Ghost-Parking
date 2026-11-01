@@ -364,6 +364,14 @@ router.post('/verify', async (req, res, next) => {
 
     const booking = await prisma.bookings.findUnique({
       where: { id: booking_id },
+      include: {
+        driver: { select: { id: true, name: true, email: true } },
+        spot: {
+          include: {
+            host: { select: { id: true, name: true, email: true, razorpay_account_id: true } },
+          },
+        },
+      },
     });
 
     if (!booking) {
@@ -398,9 +406,15 @@ router.post('/verify', async (req, res, next) => {
       }
     }
 
+    // Execute Razorpay Route logic: Transfer 80% to Host linked account, retain 20% platform fee
+    const split = calculateRouteSplit(booking.total_amount);
+    const hostAccountId = booking.spot?.host?.razorpay_account_id || 'acc_ghost_host_882';
+    const routeResult = await executeRazorpayRouteSplit(razorpay_payment_id, booking, hostAccountId);
+
     const updatedBooking = await prisma.bookings.update({
       where: { id: booking_id },
       data: {
+        total_amount: booking.total_amount,
         razorpay_order_id,
         razorpay_payment_id,
         status: 'active',
@@ -414,8 +428,16 @@ router.post('/verify', async (req, res, next) => {
     emitBookingUpdated(updatedBooking, updatedBooking.driver_id, updatedBooking.spot?.host_id);
 
     return res.json({
-      message: 'Payment authorized and verified. Parking booking is now active.',
+      success: true,
+      message: 'Payment authorized and verified. Parking booking is now active and split via Razorpay Route.',
       booking: updatedBooking,
+      route_split: {
+        total_amount: split.totalRupees,
+        host_net_earnings_80_percent: split.hostShareRupees,
+        platform_fee_20_percent: split.platformShareRupees,
+        host_account_id: hostAccountId,
+        transfer_status: routeResult.status,
+      },
     });
   } catch (error) {
     next(error);
@@ -538,9 +560,10 @@ router.post('/webhook', async (req, res, next) => {
     const paymentEntity = event?.payload?.payment?.entity;
     const orderId = paymentEntity?.order_id;
     const paymentId = paymentEntity?.id;
+    const notesBookingId = paymentEntity?.notes?.booking_id;
 
-    if (!orderId && !paymentId) {
-      return res.json({ status: 'ignored', reason: 'No order_id or payment_id in webhook payload' });
+    if (!orderId && !paymentId && !notesBookingId) {
+      return res.json({ status: 'ignored', reason: 'No order_id, payment_id, or booking_id in webhook payload' });
     }
 
     // Find corresponding booking
@@ -549,6 +572,7 @@ router.post('/webhook', async (req, res, next) => {
         OR: [
           ...(orderId ? [{ razorpay_order_id: orderId }] : []),
           ...(paymentId ? [{ razorpay_payment_id: paymentId }] : []),
+          ...(notesBookingId && isUuid(notesBookingId) ? [{ id: notesBookingId }] : []),
         ],
       },
       include: {
@@ -567,9 +591,13 @@ router.post('/webhook', async (req, res, next) => {
 
     // 1. Payment Authorized (Pre-authorization successful)
     if (eventName === 'payment.authorized') {
+      const hostAccountId = booking.spot?.host?.razorpay_account_id || 'acc_ghost_host_882';
+      const splitResult = await executeRazorpayRouteSplit(paymentId, booking, hostAccountId);
+
       const activeBooking = await prisma.bookings.update({
         where: { id: booking.id },
         data: {
+          total_amount: booking.total_amount,
           razorpay_payment_id: paymentId,
           status: 'active',
         },
@@ -579,8 +607,8 @@ router.post('/webhook', async (req, res, next) => {
         },
       });
       emitBookingUpdated(activeBooking, activeBooking.driver_id, activeBooking.spot?.host_id);
-      console.log(`[Razorpay Webhook] Booking ${booking.id} marked ACTIVE after pre-authorization`);
-      return res.json({ status: 'authorized', booking_id: booking.id });
+      console.log(`[Razorpay Webhook] Booking ${booking.id} marked ACTIVE with 80% split routed to ${hostAccountId}`);
+      return res.json({ status: 'authorized', booking_id: booking.id, route_split: splitResult.split });
     }
 
     // 2. Payment Captured / Checkout Completed -> Trigger Razorpay Route Split

@@ -7,6 +7,7 @@ const authRouter = require('./routes/auth');
 const bookingsRouter = require('./routes/bookings');
 const paymentsRouter = require('./routes/payments');
 const spotsRouter = require('./routes/spots');
+const hostRouter = require('./routes/host');
 const spotsProxy = require('./proxy/spotsProxy');
 const prisma = require('./lib/prisma');
 const redis = require('./lib/redis');
@@ -89,6 +90,9 @@ app.use('/api/spots', spotsProxy);
 
 app.use('/spots', spotsRouter);
 app.use('/api/v1/spots', spotsRouter);
+
+app.use('/host', hostRouter);
+app.use('/api/v1/host', hostRouter);
 
 // Root route
 app.get('/', (req, res) => {

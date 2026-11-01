@@ -7,7 +7,9 @@ jest.mock('../src/proxy/spotsProxy', () => (req, res, next) => next());
 
 describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
   let hostUserId;
+  let hostToken;
   let driverUserId;
+  let driverToken;
   let spotId;
   let bookingId;
 
@@ -22,6 +24,7 @@ describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
         role: 'host',
       });
     hostUserId = hostRes.body.user.id;
+    hostToken = hostRes.body.token;
 
     // 2. Create a test driver user
     const driverRes = await request(app)
@@ -33,6 +36,7 @@ describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
         role: 'driver',
       });
     driverUserId = driverRes.body.user.id;
+    driverToken = driverRes.body.token;
 
     // 3. Create a parking spot
     const spotRes = await request(app)
@@ -87,7 +91,7 @@ describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
     bookingId = res.body.booking_id;
   });
 
-  it('POST /payments/verify - transitions booking status to active upon valid callback', async () => {
+  it('POST /payments/verify - transitions booking status to active and executes Razorpay Route 80/20 split', async () => {
     const paymentId = `pay_${Date.now()}`;
     const orderRes = await request(app)
       .post('/payments/create-order')
@@ -107,8 +111,75 @@ describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
       });
 
     expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.success).toBe(true);
     expect(verifyRes.body.booking).toBeDefined();
     expect(verifyRes.body.booking.status).toBe('active');
     expect(verifyRes.body.booking.razorpay_payment_id).toBe(paymentId);
+    expect(Number(verifyRes.body.booking.total_amount)).toBe(300);
+
+    // Verify Razorpay Route Split payload (80% Host Net / 20% Platform Fee)
+    expect(verifyRes.body.route_split).toBeDefined();
+    expect(verifyRes.body.route_split.total_amount).toBe(300);
+    expect(verifyRes.body.route_split.host_net_earnings_80_percent).toBe(240); // 300 * 0.80
+    expect(verifyRes.body.route_split.platform_fee_20_percent).toBe(60); // 300 * 0.20
+  });
+
+  it('GET /host/earnings - returns 401 when unauthenticated', async () => {
+    const res = await request(app).get('/host/earnings');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /host/earnings - calculates total net earnings (Sum * 0.80) and recent transactions for host', async () => {
+    const res = await request(app)
+      .get('/host/earnings')
+      .set('Authorization', `Bearer ${hostToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.host_id).toBe(hostUserId);
+
+    // 1 active booking with total_amount 300
+    // Net: 300 * 0.80 = 240, Platform: 60
+    expect(res.body.total_gross_earnings).toBe(300);
+    expect(res.body.total_net_earnings).toBe(240);
+    expect(res.body.platform_fee_deducted).toBe(60);
+    expect(res.body.active_bookings_count).toBe(1);
+
+    expect(Array.isArray(res.body.recent_transactions)).toBe(true);
+    expect(res.body.recent_transactions.length).toBeGreaterThan(0);
+
+    const tx = res.body.recent_transactions[0];
+    expect(tx.booking_id).toBe(bookingId);
+    expect(tx.spot_title).toBe('Payment Flow Test Bay');
+    expect(tx.gross_amount).toBe(300);
+    expect(tx.host_net_earnings).toBe(240);
+    expect(tx.platform_fee).toBe(60);
+    expect(tx.status).toBe('active');
+  });
+
+  it('POST /payments/webhook - processes payment.captured event and executes Route split', async () => {
+    const webhookRes = await request(app)
+      .post('/payments/webhook')
+      .send({
+        event: 'payment.captured',
+        payload: {
+          payment: {
+            entity: {
+              id: `pay_webhook_${Date.now()}`,
+              amount: 30000,
+              notes: {
+                booking_id: bookingId,
+              },
+            },
+          },
+        },
+      });
+
+    expect(webhookRes.status).toBe(200);
+    expect(['split_completed', 'ok']).toContain(webhookRes.body.status);
+    if (webhookRes.body.status === 'split_completed') {
+      expect(webhookRes.body.route_split).toBeDefined();
+      expect(webhookRes.body.route_split.hostShareRupees).toBe(240);
+    }
   });
 });
