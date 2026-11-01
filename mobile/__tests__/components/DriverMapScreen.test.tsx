@@ -100,4 +100,31 @@ describe('Component Test: DriverMapScreen', () => {
     expect(getByTestId('gateway-status-bar')).toBeTruthy();
     expect(getByTestId('refresh-spots-btn')).toBeTruthy();
   });
+
+  it('dynamically renders newly available parking spot in real-time when WebSocket broadcast arrives', async () => {
+    const { getByTestId, getAllByText } = renderScreen();
+
+    const socketMock = require('../../src/services/socketService');
+    const newSpotData = {
+      id: 'spot-ws-live-999',
+      title: 'HSR Layout Live Driveway',
+      address: '27th Main Rd, HSR Layout Sector 1',
+      latitude: 12.9121,
+      longitude: 77.6446,
+      hourly_rate: 95,
+      is_active: true,
+      available_slots: 2,
+    };
+
+    const { act } = require('@testing-library/react-native');
+    act(() => {
+      socketMock.__emitMockEvent('new_spot_available', newSpotData);
+    });
+
+    await waitFor(() => {
+      expect(getAllByText('HSR Layout Live Driveway').length).toBeGreaterThan(0);
+      expect(getByTestId('live-spot-banner')).toBeTruthy();
+      expect(getByTestId('map-marker-spot-ws-live-999')).toBeTruthy();
+    });
+  });
 });
