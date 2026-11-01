@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,8 @@ import { Card } from '../../components/common/Card';
 import { formatCurrency } from '../../utils/formatting';
 import { isWithinCheckInRadius, createOffsetCoordinate } from '../../utils/geo';
 import { checkInBooking } from '../../services/bookingService';
+import { useAuth } from '../../context/AuthContext';
+import { connectSocket, onBookingUpdated } from '../../services/socketService';
 
 export interface BookingItem {
   id: string;
@@ -88,8 +90,10 @@ export const INITIAL_BOOKINGS: BookingItem[] = [
 ];
 
 export const DriverBookingsScreen: React.FC = () => {
+  const { userToken } = useAuth();
   const [bookings, setBookings] = useState<BookingItem[]>(INITIAL_BOOKINGS);
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [liveBanner, setLiveBanner] = useState<string | null>(null);
   const [checkingInId, setCheckingInId] = useState<string | null>(null);
   const [checkInStatus, setCheckInStatus] = useState<{
     bookingId: string;
@@ -97,6 +101,91 @@ export const DriverBookingsScreen: React.FC = () => {
     message: string;
     distanceMeters?: number;
   } | null>(null);
+  const isMountedRef = useRef(true);
+
+  // WebSocket listener for real-time reservation updates
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    // Connect socket with driver JWT so it joins room_user_{id}
+    connectSocket({ token: userToken });
+
+    const handleBookingUpdated = (rawBooking: any) => {
+      if (!isMountedRef.current || !rawBooking || !rawBooking.id) return;
+
+      const mappedStatus: 'active' | 'upcoming' | 'completed' =
+        rawBooking.status === 'completed'
+          ? 'completed'
+          : rawBooking.status === 'active'
+          ? 'active'
+          : rawBooking.status === 'cancelled'
+          ? 'completed'
+          : 'upcoming';
+
+      const escrowStatus: 'held' | 'released' | 'refunded' =
+        rawBooking.status === 'completed'
+          ? 'released'
+          : rawBooking.status === 'cancelled'
+          ? 'refunded'
+          : 'held';
+
+      setBookings((prev) => {
+        const index = prev.findIndex((b) => b.id === rawBooking.id);
+        if (index >= 0) {
+          const updated = [...prev];
+          const existing = updated[index];
+          updated[index] = {
+            ...existing,
+            status: mappedStatus,
+            escrowStatus,
+            checkedIn: rawBooking.status === 'active' ? true : existing.checkedIn,
+            checkedInAt:
+              rawBooking.status === 'active'
+                ? existing.checkedInAt || 'Verified GPS'
+                : existing.checkedInAt,
+          };
+          return updated;
+        }
+
+        // Dynamically prepend new incoming reservation
+        const newBooking: BookingItem = {
+          id: rawBooking.id,
+          spotTitle: rawBooking.spot?.title || rawBooking.spotTitle || 'Reserved Parking Bay',
+          address: rawBooking.spot?.address || rawBooking.address || 'Bengaluru, KA',
+          latitude: rawBooking.spot?.latitude || rawBooking.latitude || 12.9716,
+          longitude: rawBooking.spot?.longitude || rawBooking.longitude || 77.5946,
+          startTime: 'Today, ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          endTime:
+            'Today, ' +
+            new Date(Date.now() + 2 * 3600 * 1000).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          durationHours: 2,
+          totalAmount: parseFloat(rawBooking.total_amount || rawBooking.totalAmount || 160),
+          status: mappedStatus,
+          escrowStatus,
+          spotNumber: rawBooking.spotNumber || 'Bay 01',
+          checkedIn: mappedStatus === 'active',
+        };
+        return [newBooking, ...prev];
+      });
+
+      setLiveBanner(`Reservation ${rawBooking.id.substring(0, 8)} status: ${mappedStatus.toUpperCase()}`);
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          setLiveBanner(null);
+        }
+      }, 5000);
+    };
+
+    const unsubscribe = onBookingUpdated(handleBookingUpdated);
+
+    return () => {
+      isMountedRef.current = false;
+      unsubscribe();
+    };
+  }, [userToken]);
 
   const filteredBookings = bookings.filter((b) => {
     if (filter === 'active') return b.status === 'active' || b.status === 'upcoming';
@@ -249,6 +338,16 @@ export const DriverBookingsScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
       <Header title="My Reservations" subtitle="Active and past parking sessions" />
+
+      {/* Real-time WebSocket Event Notification Banner */}
+      {liveBanner && (
+        <View style={styles.liveBanner} testID="driver-live-banner">
+          <Ionicons name="flash" size={14} color="#00F5FF" style={{ marginRight: 6 }} />
+          <Text style={styles.liveBannerText} numberOfLines={1}>
+            {liveBanner}
+          </Text>
+        </View>
+      )}
 
       <ScrollView
         style={styles.container}
@@ -689,5 +788,20 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 13,
     textAlign: 'center',
+  },
+  liveBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 245, 255, 0.1)',
+    borderBottomWidth: 1,
+    borderColor: 'rgba(0, 245, 255, 0.3)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  liveBannerText: {
+    color: '#00F5FF',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
 });

@@ -1,9 +1,12 @@
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { DriverBookingsScreen } from '../../src/screens/driver/DriverBookingsScreen';
 import { AuthProvider } from '../../src/context/AuthContext';
+
+// Import mocked socketService to trigger simulated WebSocket broadcasts
+const { __emitMockEvent } = require('../../src/services/socketService');
 
 // Spy on Alert.alert
 const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -157,5 +160,43 @@ describe('Component Test: Driver Check-In Logic', () => {
       'Permission Denied',
       expect.stringContaining('Location permission is required')
     );
+  });
+
+  it('updates reservation card in real time when "booking_updated" socket event is received', async () => {
+    const { findByText, getByTestId } = renderScreen();
+
+    // Simulate backend payment clearing / host check-in socket broadcast
+    act(() => {
+      __emitMockEvent('booking_updated', {
+        id: 'res_up_381',
+        spotTitle: 'Indiranagar 100ft Rd Garage',
+        status: 'active',
+        total_amount: 240,
+      });
+    });
+
+    // Verify notification banner appears
+    expect(await findByText(/Reservation res_up_3 status: ACTIVE/i)).toBeTruthy();
+    expect(getByTestId('driver-live-banner')).toBeTruthy();
+  });
+
+  it('dynamically prepends new incoming reservation on "booking_updated" socket event', async () => {
+    const { findByTestId, findByText } = renderScreen();
+
+    // Simulate newly created booking via Razorpay checkout
+    act(() => {
+      __emitMockEvent('booking_updated', {
+        id: 'res_driver_realtime_888',
+        spotTitle: 'Church Street Underground Bay',
+        address: 'Church St, Shanthala Nagar, Ashok Nagar',
+        status: 'active',
+        total_amount: 300,
+        spotNumber: 'Bay D-19',
+      });
+    });
+
+    const newCard = await findByTestId('booking-card-res_driver_realtime_888');
+    expect(newCard).toBeTruthy();
+    expect(await findByText('Church Street Underground Bay')).toBeTruthy();
   });
 });
