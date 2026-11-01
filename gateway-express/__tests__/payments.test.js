@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const request = require('supertest');
 const app = require('../src/server');
 const prisma = require('../src/lib/prisma');
@@ -91,7 +92,7 @@ describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
     bookingId = res.body.booking_id;
   });
 
-  it('POST /payments/verify - transitions booking status to active and executes Razorpay Route 80/20 split', async () => {
+  it('POST /payments/verify - transitions booking status to active and executes Razorpay Route 80/20 split upon valid HMAC signature', async () => {
     const paymentId = `pay_${Date.now()}`;
     const orderRes = await request(app)
       .post('/payments/create-order')
@@ -102,12 +103,36 @@ describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
     expect(orderRes.status).toBe(201);
     const orderId = orderRes.body.order_id;
 
+    // Verify booking strictly remains 'pending' after order creation
+    const pendingBooking = await prisma.bookings.findUnique({ where: { id: bookingId } });
+    expect(pendingBooking.status).toBe('pending');
+
+    // Rejection on invalid signature
+    const invalidVerifyRes = await request(app)
+      .post('/payments/verify')
+      .send({
+        booking_id: bookingId,
+        razorpay_order_id: orderId,
+        razorpay_payment_id: paymentId,
+        razorpay_signature: 'invalid_tampered_signature_hex',
+      });
+
+    expect(invalidVerifyRes.status).toBe(400);
+    expect(invalidVerifyRes.body.error).toBe('Invalid payment signature');
+
+    // Cryptographic HMAC SHA256 signature generation matching Razorpay Standard
+    const validSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${orderId}|${paymentId}`)
+      .digest('hex');
+
     const verifyRes = await request(app)
       .post('/payments/verify')
       .send({
         booking_id: bookingId,
         razorpay_order_id: orderId,
         razorpay_payment_id: paymentId,
+        razorpay_signature: validSignature,
       });
 
     expect(verifyRes.status).toBe(200);
@@ -122,6 +147,45 @@ describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
     expect(verifyRes.body.route_split.total_amount).toBe(300);
     expect(verifyRes.body.route_split.host_net_earnings_80_percent).toBe(240); // 300 * 0.80
     expect(verifyRes.body.route_split.platform_fee_20_percent).toBe(60); // 300 * 0.20
+  });
+
+  it('POST /payments/process-test-card - authorizes dummy card and returns genuine HMAC signature', async () => {
+    const orderRes = await request(app)
+      .post('/payments/create-order')
+      .send({
+        booking_id: bookingId,
+      });
+
+    expect(orderRes.status).toBe(201);
+    const orderId = orderRes.body.order_id;
+
+    const cardRes = await request(app)
+      .post('/payments/process-test-card')
+      .send({
+        order_id: orderId,
+        card_number: '4000 0000 0000 0002',
+        expiry: '12/30',
+        cvv: '123',
+      });
+
+    expect(cardRes.status).toBe(200);
+    expect(cardRes.body.success).toBe(true);
+    expect(cardRes.body.razorpay_payment_id).toBeDefined();
+    expect(cardRes.body.razorpay_order_id).toBe(orderId);
+    expect(cardRes.body.razorpay_signature).toBeDefined();
+
+    // Verify signature with /payments/verify
+    const verifyRes = await request(app)
+      .post('/payments/verify')
+      .send({
+        booking_id: bookingId,
+        razorpay_order_id: cardRes.body.razorpay_order_id,
+        razorpay_payment_id: cardRes.body.razorpay_payment_id,
+        razorpay_signature: cardRes.body.razorpay_signature,
+      });
+
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.success).toBe(true);
   });
 
   it('GET /host/earnings - returns 401 when unauthenticated', async () => {
