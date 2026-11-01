@@ -28,6 +28,8 @@ import {
   createPaymentOrder,
   openRazorpayCheckout,
   verifyPayment,
+  processTestCardPayment,
+  isNativeRazorpayAvailable,
 } from '../../services/paymentService';
 import { useAuth } from '../../context/AuthContext';
 
@@ -51,6 +53,18 @@ export const DriverMapScreen: React.FC = () => {
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [bookingConfirmed, setBookingConfirmed] = useState(false);
   const [activePaymentRecord, setActivePaymentRecord] = useState<any>(null);
+
+  // In-App Razorpay Test Modal states (Expo Go fallback)
+  const [showTestModal, setShowTestModal] = useState(false);
+  const [pendingOrderData, setPendingOrderData] = useState<{
+    orderId: string;
+    bookingId: string;
+    amount: number;
+  } | null>(null);
+  const [testCardNumber, setTestCardNumber] = useState('4000 0000 0000 0002');
+  const [testExpiry, setTestExpiry] = useState('12/30');
+  const [testCvv, setTestCvv] = useState('123');
+  const [testCardholder, setTestCardholder] = useState('Verified Driver');
 
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -274,46 +288,121 @@ export const DriverMapScreen: React.FC = () => {
         throw new Error(orderRes.error || 'Failed to initialize payment order');
       }
 
-      // 2. Open Native Razorpay Checkout Modal
-      const checkoutResult = await openRazorpayCheckout({
-        key: orderRes.key_id || 'rzp_test_placeholder',
-        amount: orderRes.amount || totalAmount * 100,
-        currency: 'INR',
-        name: 'Ghost Parking',
-        description: `Reserve: ${selectedSpot.title} (${bookingHours} hrs)`,
-        order_id: orderRes.order_id,
-        prefill: {
-          email: user?.email || 'driver@ghostparking.com',
-          contact: user?.phone || '+91 98765 43210',
-          name: user?.name || 'Verified Driver',
-        },
-        theme: { color: colors.primary },
-      });
+      // 2. Check if Native Razorpay binary is present (Bare / EAS build)
+      if (isNativeRazorpayAvailable()) {
+        const razorpayKey =
+          orderRes.key_id ||
+          process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID ||
+          'rzp_test_TpMSjWEuKaM6of';
 
-      // 3. Verify Payment Callback with Express Gateway
+        const checkoutResult = await openRazorpayCheckout({
+          key: razorpayKey,
+          amount: orderRes.amount || totalAmount * 100,
+          currency: 'INR',
+          name: 'Ghost Parking',
+          description: `Reserve: ${selectedSpot.title} (${bookingHours} hrs)`,
+          order_id: orderRes.order_id,
+          prefill: {
+            email: user?.email || 'driver@ghostparking.com',
+            contact: user?.phone || '+91 98765 43210',
+            name: user?.name || 'Verified Driver',
+          },
+          theme: { color: colors.primary },
+        });
+
+        // 3. Cryptographically Verify Signature with Express Gateway
+        const verifyRes = await verifyPayment(
+          {
+            booking_id: orderRes.booking_id || `bk_${Date.now()}`,
+            razorpay_order_id: checkoutResult.razorpay_order_id || orderRes.order_id,
+            razorpay_payment_id: checkoutResult.razorpay_payment_id,
+            razorpay_signature: checkoutResult.razorpay_signature,
+          },
+          userToken
+        );
+
+        if (!verifyRes.success) {
+          throw new Error(verifyRes.error || 'Payment verification failed');
+        }
+
+        // 4. Update confirmed booking state upon verified active status
+        setActivePaymentRecord({
+          bookingId: orderRes.booking_id,
+          paymentId: checkoutResult.razorpay_payment_id,
+          orderId: checkoutResult.razorpay_order_id,
+          hours: bookingHours,
+          amount: totalAmount,
+          spot: selectedSpot,
+        });
+        setBookingConfirmed(true);
+      } else {
+        // Expo Go session: Transition to interactive Razorpay Test Modal for manual card entry
+        setPendingOrderData({
+          orderId: orderRes.order_id,
+          bookingId: orderRes.booking_id || `bk_${Date.now()}`,
+          amount: totalAmount,
+        });
+        setShowTestModal(true);
+      }
+    } catch (err: any) {
+      setPaymentError(err.message || 'Payment processing was cancelled or failed.');
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  /**
+   * Authorizes manual test card details entered in the Razorpay Test Modal
+   * and cryptographically verifies with Express Gateway.
+   */
+  const handleExecuteTestCardPayment = async () => {
+    if (!pendingOrderData || !selectedSpot) return;
+
+    setIsProcessingPayment(true);
+    setPaymentError(null);
+
+    try {
+      // 1. Authorize test card on Express Gateway
+      const cardRes = await processTestCardPayment(
+        {
+          order_id: pendingOrderData.orderId,
+          card_number: testCardNumber,
+          expiry: testExpiry,
+          cvv: testCvv,
+        },
+        userToken
+      );
+
+      if (!cardRes.success || !cardRes.razorpay_signature || !cardRes.razorpay_payment_id) {
+        throw new Error(cardRes.error || 'Card payment authorization failed');
+      }
+
+      // 2. Cryptographically Verify Signature with Express Gateway (HMAC-SHA256)
       const verifyRes = await verifyPayment(
         {
-          booking_id: orderRes.booking_id || `bk_${Date.now()}`,
-          razorpay_order_id: checkoutResult.razorpay_order_id,
-          razorpay_payment_id: checkoutResult.razorpay_payment_id,
-          razorpay_signature: checkoutResult.razorpay_signature,
+          booking_id: pendingOrderData.bookingId,
+          razorpay_order_id: cardRes.razorpay_order_id || pendingOrderData.orderId,
+          razorpay_payment_id: cardRes.razorpay_payment_id,
+          razorpay_signature: cardRes.razorpay_signature,
         },
         userToken
       );
 
       if (!verifyRes.success) {
-        throw new Error(verifyRes.error || 'Payment verification failed');
+        throw new Error(verifyRes.error || 'Payment signature verification failed');
       }
 
-      // 4. Update confirmed booking state upon verified active status
+      // 3. Update confirmed booking state upon verified active status
       setActivePaymentRecord({
-        bookingId: orderRes.booking_id,
-        paymentId: checkoutResult.razorpay_payment_id,
-        orderId: checkoutResult.razorpay_order_id,
+        bookingId: pendingOrderData.bookingId,
+        paymentId: cardRes.razorpay_payment_id,
+        orderId: cardRes.razorpay_order_id || pendingOrderData.orderId,
         hours: bookingHours,
-        amount: totalAmount,
+        amount: pendingOrderData.amount,
         spot: selectedSpot,
       });
+
+      setShowTestModal(false);
       setBookingConfirmed(true);
     } catch (err: any) {
       setPaymentError(err.message || 'Payment processing was cancelled or failed.');
@@ -546,6 +635,119 @@ export const DriverMapScreen: React.FC = () => {
                     setBookingConfirmed(false);
                   }}
                   style={{ marginTop: 16, width: '100%' }}
+                />
+              </View>
+            ) : showTestModal && pendingOrderData ? (
+              <View style={styles.testModalContainer} testID="razorpay-test-modal">
+                <View style={styles.testModalHeader}>
+                  <View style={styles.razorpayBadgeRow}>
+                    <View style={styles.razorpayLogoBox}>
+                      <Text style={styles.razorpayLogoText}>R</Text>
+                    </View>
+                    <View>
+                      <Text style={styles.testModalTitle}>Razorpay Checkout</Text>
+                      <Text style={styles.testModalSubtitle}>TEST MODE • Ghost Parking Escrow</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowTestModal(false);
+                      setIsProcessingPayment(false);
+                    }}
+                    disabled={isProcessingPayment}
+                    style={styles.closeModalBtn}
+                  >
+                    <Ionicons name="close" size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.testAmountBanner}>
+                  <Text style={styles.testAmountLabel}>Total Escrow Amount</Text>
+                  <Text style={styles.testAmountValue}>{formatCurrency(pendingOrderData.amount)}</Text>
+                  <Text style={styles.testOrderIdText}>Order ID: {pendingOrderData.orderId}</Text>
+                </View>
+
+                {paymentError && (
+                  <View style={styles.paymentErrorBanner}>
+                    <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+                    <Text style={styles.paymentErrorText}>{paymentError}</Text>
+                  </View>
+                )}
+
+                <Text style={styles.testCardSectionTitle}>Enter Test Card Details:</Text>
+
+                <View style={styles.testInputGroup}>
+                  <Text style={styles.testInputLabel}>Test Card Number</Text>
+                  <TextInput
+                    style={styles.testTextInput}
+                    value={testCardNumber}
+                    onChangeText={setTestCardNumber}
+                    placeholder="4000 0000 0000 0002"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    editable={!isProcessingPayment}
+                  />
+                </View>
+
+                <View style={styles.testInputRow}>
+                  <View style={[styles.testInputGroup, { flex: 1, marginRight: 8 }]}>
+                    <Text style={styles.testInputLabel}>Expiry (MM/YY)</Text>
+                    <TextInput
+                      style={styles.testTextInput}
+                      value={testExpiry}
+                      onChangeText={setTestExpiry}
+                      placeholder="12/30"
+                      placeholderTextColor={colors.textMuted}
+                      editable={!isProcessingPayment}
+                    />
+                  </View>
+
+                  <View style={[styles.testInputGroup, { flex: 1, marginLeft: 8 }]}>
+                    <Text style={styles.testInputLabel}>CVV</Text>
+                    <TextInput
+                      style={styles.testTextInput}
+                      value={testCvv}
+                      onChangeText={setTestCvv}
+                      placeholder="123"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="number-pad"
+                      secureTextEntry
+                      editable={!isProcessingPayment}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.testInputGroup}>
+                  <Text style={styles.testInputLabel}>Cardholder Name</Text>
+                  <TextInput
+                    style={styles.testTextInput}
+                    value={testCardholder}
+                    onChangeText={setTestCardholder}
+                    placeholder="Verified Driver"
+                    placeholderTextColor={colors.textMuted}
+                    editable={!isProcessingPayment}
+                  />
+                </View>
+
+                <View style={styles.testCardNotice}>
+                  <Ionicons name="shield-checkmark-outline" size={16} color="#00F0FF" style={{ marginRight: 6 }} />
+                  <Text style={styles.testCardNoticeText}>
+                    Razorpay Test Sandbox: Submitting signs with RAZORPAY_KEY_SECRET and validates HMAC SHA256.
+                  </Text>
+                </View>
+
+                <Button
+                  testID="submit-test-payment-btn"
+                  title={
+                    isProcessingPayment
+                      ? 'Authorizing with Razorpay...'
+                      : `Authorize & Pay (${formatCurrency(pendingOrderData.amount)})`
+                  }
+                  variant="primary"
+                  loading={isProcessingPayment}
+                  disabled={isProcessingPayment}
+                  onPress={handleExecuteTestCardPayment}
+                  style={{ marginTop: 8 }}
                 />
               </View>
             ) : (
@@ -1002,5 +1204,114 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 12,
     fontWeight: '600',
+  },
+  testModalContainer: {
+    paddingVertical: 8,
+  },
+  testModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  razorpayBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  razorpayLogoBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#0C2340',
+    borderWidth: 1,
+    borderColor: '#0284C7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  razorpayLogoText: {
+    color: '#38BDF8',
+    fontWeight: '900',
+    fontSize: 17,
+  },
+  testModalTitle: {
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  testModalSubtitle: {
+    color: '#38BDF8',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  testAmountBanner: {
+    backgroundColor: 'rgba(14, 165, 233, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(14, 165, 233, 0.3)',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  testAmountLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    textTransform: 'uppercase',
+  },
+  testAmountValue: {
+    color: colors.primary,
+    fontSize: 24,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  testOrderIdText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  testCardSectionTitle: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  testInputGroup: {
+    marginBottom: 10,
+  },
+  testInputLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  testTextInput: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    color: colors.textPrimary,
+    fontSize: 14,
+  },
+  testInputRow: {
+    flexDirection: 'row',
+  },
+  testCardNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 240, 255, 0.08)',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 240, 255, 0.2)',
+  },
+  testCardNoticeText: {
+    color: '#BAE6FD',
+    fontSize: 11,
+    flex: 1,
+    lineHeight: 15,
   },
 });

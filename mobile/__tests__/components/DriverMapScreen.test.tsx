@@ -68,25 +68,36 @@ jest.mock('../../src/services/spotService', () => {
 });
 
 // Mock Razorpay payment service for deterministic component testing
-jest.mock('../../src/services/paymentService', () => ({
-  createPaymentOrder: jest.fn(async () => ({
-    success: true,
-    order_id: 'order_test_mock_123',
-    amount: 24000,
-    currency: 'INR',
-    key_id: 'rzp_test_placeholder',
-    booking_id: 'booking_test_mock_123',
-  })),
-  openRazorpayCheckout: jest.fn(async () => ({
-    razorpay_payment_id: 'pay_test_mock_123',
-    razorpay_order_id: 'order_test_mock_123',
-    razorpay_signature: 'sig_test_mock_123',
-  })),
-  verifyPayment: jest.fn(async () => ({
-    success: true,
-    booking: { id: 'booking_test_mock_123', status: 'active' },
-  })),
-}));
+jest.mock('../../src/services/paymentService', () => {
+  const actual = jest.requireActual('../../src/services/paymentService');
+  return {
+    ...actual,
+    isNativeRazorpayAvailable: jest.fn(() => true),
+    createPaymentOrder: jest.fn(async () => ({
+      success: true,
+      order_id: 'order_test_mock_123',
+      amount: 24000,
+      currency: 'INR',
+      key_id: 'rzp_test_placeholder',
+      booking_id: 'booking_test_mock_123',
+    })),
+    openRazorpayCheckout: jest.fn(async () => ({
+      razorpay_payment_id: 'pay_test_mock_123',
+      razorpay_order_id: 'order_test_mock_123',
+      razorpay_signature: 'sig_test_mock_123',
+    })),
+    processTestCardPayment: jest.fn(async () => ({
+      success: true,
+      razorpay_payment_id: 'pay_test_mock_123',
+      razorpay_order_id: 'order_test_mock_123',
+      razorpay_signature: 'sig_test_mock_123',
+    })),
+    verifyPayment: jest.fn(async () => ({
+      success: true,
+      booking: { id: 'booking_test_mock_123', status: 'active' },
+    })),
+  };
+});
 
 describe('Component Test: DriverMapScreen', () => {
   const renderScreen = () =>

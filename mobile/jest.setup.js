@@ -1,9 +1,21 @@
 /* eslint-disable no-undef */
-import { Animated } from 'react-native';
+import { Animated, NativeModules } from 'react-native';
+
+// Setup NativeModules.RNRazorpayCheckout for Jest
+NativeModules.RNRazorpayCheckout = { open: jest.fn() };
 
 // Setup Reanimated mock for Jest in SDK 57
 jest.mock('react-native-worklets', () => ({}));
 jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'));
+
+// Mock react-native-razorpay for Jest test runner
+jest.mock('react-native-razorpay', () => ({
+  open: jest.fn(async (options) => ({
+    razorpay_payment_id: 'pay_test_rzp_mock_123',
+    razorpay_order_id: options?.order_id || 'order_test_rzp_mock_456',
+    razorpay_signature: 'test_cryptographic_signature_mock',
+  })),
+}));
 
 // Mock @expo/vector-icons and font loading for Jest
 jest.mock('expo-font', () => ({

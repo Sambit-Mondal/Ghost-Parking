@@ -1,5 +1,14 @@
 import { NativeModules } from 'react-native';
+import RazorpayCheckout from 'react-native-razorpay';
 import { getApiBaseUrl } from '../config/api';
+
+/**
+ * Checks whether the native Razorpay Android/iOS binary is linked (available in bare/EAS builds).
+ * Returns false when running in standard Expo Go on physical devices.
+ */
+export function isNativeRazorpayAvailable(): boolean {
+  return !!(NativeModules && NativeModules.RNRazorpayCheckout);
+}
 
 export interface CreateOrderParams {
   booking_id?: string;
@@ -22,20 +31,39 @@ export interface CreateOrderResponse {
 export interface RazorpayPaymentSuccess {
   razorpay_payment_id: string;
   razorpay_order_id: string;
-  razorpay_signature?: string;
+  razorpay_signature: string;
 }
 
 export interface VerifyPaymentParams {
   booking_id: string;
   razorpay_order_id: string;
   razorpay_payment_id: string;
-  razorpay_signature?: string;
+  razorpay_signature: string;
 }
 
 export interface VerifyPaymentResponse {
   success: boolean;
   booking?: any;
   error?: string;
+}
+
+export interface RazorpayCheckoutOptions {
+  key: string;
+  amount: number; // in paise
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill?: {
+    email?: string;
+    contact?: string;
+    name?: string;
+  };
+  theme?: {
+    color?: string;
+  };
+  image?: string;
+  [key: string]: any;
 }
 
 /**
@@ -84,58 +112,96 @@ export async function createPaymentOrder(
 
 /**
  * Step 2: Open Razorpay Native Checkout Modal via react-native-razorpay SDK
- * If running inside Expo Go or Jest test environment where native modules are not linked,
- * falls back to simulated test checkout response with realistic keys.
+ * Strictly invokes RazorpayCheckout.open(options) and awaits user interaction
+ * with the native Razorpay test UI. Rejects with 'NATIVE_RAZORPAY_UNAVAILABLE'
+ * in environments like Expo Go where the native module is unlinked.
  */
-export async function openRazorpayCheckout(options: {
-  key: string;
-  amount: number;
-  currency: string;
-  name: string;
-  description: string;
-  order_id: string;
-  prefill: {
-    email: string;
-    contact: string;
-    name: string;
-  };
-  theme?: { color: string };
-}): Promise<RazorpayPaymentSuccess> {
-  // Check if native Razorpay module is linked (e.g. in standalone / dev builds)
-  const isNativeModuleAvailable = !!NativeModules.RNRazorpayCheckout;
-
-  if (isNativeModuleAvailable) {
-    let RazorpayCheckout: any;
-    try {
-      const razorpayModule = require('react-native-razorpay');
-      RazorpayCheckout = razorpayModule.default || razorpayModule;
-    } catch {
-      RazorpayCheckout = null;
+export function openRazorpayCheckout(
+  options: RazorpayCheckoutOptions
+): Promise<RazorpayPaymentSuccess> {
+  return new Promise((resolve, reject) => {
+    if (!isNativeRazorpayAvailable()) {
+      reject(new Error('NATIVE_RAZORPAY_UNAVAILABLE'));
+      return;
     }
-
-    if (RazorpayCheckout && typeof RazorpayCheckout.open === 'function') {
-      return new Promise((resolve, reject) => {
-        RazorpayCheckout.open(options)
-          .then((data: any) => {
-            resolve({
-              razorpay_payment_id: data.razorpay_payment_id,
-              razorpay_order_id: data.razorpay_order_id || options.order_id,
-              razorpay_signature: data.razorpay_signature || 'simulated_sig',
-            });
-          })
-          .catch((error: any) => {
-            reject(new Error(error?.description || error?.message || 'Payment cancelled by user'));
-          });
+    RazorpayCheckout.open(options)
+      .then((data: any) => {
+        if (!data || !data.razorpay_payment_id) {
+          reject(new Error('Invalid payment response from Razorpay'));
+          return;
+        }
+        resolve({
+          razorpay_payment_id: data.razorpay_payment_id,
+          razorpay_order_id: data.razorpay_order_id || options.order_id,
+          razorpay_signature: data.razorpay_signature,
+        });
+      })
+      .catch((error: any) => {
+        const errorMsg =
+          error?.description ||
+          error?.error?.description ||
+          error?.message ||
+          'Payment cancelled by user';
+        reject(new Error(errorMsg));
       });
-    }
+  });
+}
+
+export interface ProcessTestCardParams {
+  order_id: string;
+  card_number?: string;
+  expiry?: string;
+  cvv?: string;
+}
+
+export interface ProcessTestCardResponse {
+  success: boolean;
+  razorpay_payment_id?: string;
+  razorpay_order_id?: string;
+  razorpay_signature?: string;
+  error?: string;
+}
+
+/**
+ * Step 2b: Process manual test card credentials on Express Gateway for Expo Go sessions.
+ * Returns genuine Razorpay cryptographic signature signed with RAZORPAY_KEY_SECRET.
+ */
+export async function processTestCardPayment(
+  params: ProcessTestCardParams,
+  token?: string | null
+): Promise<ProcessTestCardResponse> {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/payments/process-test-card`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'x-client': 'ghost-parking-mobile',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
 
-  // Graceful test environment / Expo Go fallback with realistic Razorpay callback
-  await new Promise((res) => setTimeout(res, 800));
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(params),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.success) {
+    return {
+      success: false,
+      error: data.error || `Test payment processing failed (Status ${response.status})`,
+    };
+  }
+
   return {
-    razorpay_payment_id: `pay_rzp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    razorpay_order_id: options.order_id,
-    razorpay_signature: `sig_${Math.random().toString(36).substring(2, 10)}`,
+    success: true,
+    razorpay_payment_id: data.razorpay_payment_id,
+    razorpay_order_id: data.razorpay_order_id,
+    razorpay_signature: data.razorpay_signature,
   };
 }
 

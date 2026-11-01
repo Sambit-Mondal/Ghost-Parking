@@ -2,6 +2,8 @@ import {
   createPaymentOrder,
   openRazorpayCheckout,
   verifyPayment,
+  processTestCardPayment,
+  isNativeRazorpayAvailable,
   fetchHostEarnings,
 } from '../../src/services/paymentService';
 
@@ -68,7 +70,7 @@ describe('Unit Test Suite: paymentService', () => {
   });
 
   describe('openRazorpayCheckout', () => {
-    it('returns simulated checkout object in test environment', async () => {
+    it('invokes native Razorpay modal and resolves with payment ID, order ID, and cryptographic signature', async () => {
       const checkoutRes = await openRazorpayCheckout({
         key: 'rzp_test_key',
         amount: 24000,
@@ -84,9 +86,74 @@ describe('Unit Test Suite: paymentService', () => {
       });
 
       expect(checkoutRes.razorpay_order_id).toBe('order_test_999');
-      expect(checkoutRes.razorpay_payment_id).toBeDefined();
-      expect(checkoutRes.razorpay_payment_id.startsWith('pay_rzp_')).toBe(true);
-      expect(checkoutRes.razorpay_signature).toBeDefined();
+      expect(checkoutRes.razorpay_payment_id).toBe('pay_test_rzp_mock_123');
+      expect(checkoutRes.razorpay_signature).toBe('test_cryptographic_signature_mock');
+    });
+
+    it('rejects with error when user cancels or payment fails', async () => {
+      const RazorpayCheckout = require('react-native-razorpay');
+      const originalOpen = RazorpayCheckout.open;
+      RazorpayCheckout.open = jest.fn().mockRejectedValue({
+        description: 'Payment cancelled by user',
+      });
+
+      await expect(
+        openRazorpayCheckout({
+          key: 'rzp_test_key',
+          amount: 24000,
+          currency: 'INR',
+          name: 'Ghost Parking',
+          description: 'Test Parking',
+          order_id: 'order_test_999',
+        })
+      ).rejects.toThrow('Payment cancelled by user');
+
+      RazorpayCheckout.open = originalOpen;
+    });
+  });
+
+  describe('processTestCardPayment', () => {
+    it('sends POST /payments/process-test-card and returns payment ID and cryptographic signature', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          razorpay_payment_id: 'pay_test_genuine_123',
+          razorpay_order_id: 'order_test_999',
+          razorpay_signature: 'genuine_hmac_sha256_sig',
+        }),
+      });
+
+      const res = await processTestCardPayment({
+        order_id: 'order_test_999',
+        card_number: '4000 0000 0000 0002',
+        expiry: '12/30',
+        cvv: '123',
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.razorpay_payment_id).toBe('pay_test_genuine_123');
+      expect(res.razorpay_signature).toBe('genuine_hmac_sha256_sig');
+    });
+
+    it('returns error if test card processing fails', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          success: false,
+          error: 'Invalid test card length',
+        }),
+      });
+
+      const res = await processTestCardPayment({
+        order_id: 'order_test_999',
+        card_number: '123',
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toBe('Invalid test card length');
     });
   });
 
