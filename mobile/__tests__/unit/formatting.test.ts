@@ -3,6 +3,9 @@ import {
   formatDistance,
   calculateHostSplit,
   formatTimeAgo,
+  formatCardNumber,
+  stripCardNumber,
+  cleanCardNumber,
 } from '../../src/utils/formatting';
 
 describe('Unit Tests: formatting utils', () => {
@@ -76,6 +79,57 @@ describe('Unit Tests: formatting utils', () => {
     it('returns days ago for dates older than 24 hours', () => {
       const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
       expect(formatTimeAgo(twoDaysAgo)).toBe('2d ago');
+    });
+  });
+
+  describe('formatCardNumber', () => {
+    it('formats raw digits into 4-digit groups separated by a single space', () => {
+      expect(formatCardNumber('4000000000000002')).toBe('4000 0000 0000 0002');
+      expect(formatCardNumber('5555510000081006')).toBe('5555 5100 0008 1006');
+    });
+
+    it('formats partial input dynamically as the user types', () => {
+      expect(formatCardNumber('4')).toBe('4');
+      expect(formatCardNumber('4000')).toBe('4000');
+      expect(formatCardNumber('40001')).toBe('4000 1');
+      expect(formatCardNumber('40001234')).toBe('4000 1234');
+      expect(formatCardNumber('400012345')).toBe('4000 1234 5');
+    });
+
+    it('strips existing spaces and non-numeric characters before formatting', () => {
+      expect(formatCardNumber('4000 0000 0000 0002')).toBe('4000 0000 0000 0002');
+      expect(formatCardNumber('4000-0000-0000-0002')).toBe('4000 0000 0000 0002');
+      expect(formatCardNumber('  4000  0000  ')).toBe('4000 0000');
+    });
+
+    it('caps total digits at 16, resulting in maximum 19 characters', () => {
+      const longInput = '40000000000000029999999';
+      const formatted = formatCardNumber(longInput);
+      expect(formatted).toBe('4000 0000 0000 0002');
+      expect(formatted.length).toBe(19);
+    });
+
+    it('handles empty or undefined values safely', () => {
+      expect(formatCardNumber('')).toBe('');
+      expect(formatCardNumber(null as any)).toBe('');
+      expect(formatCardNumber(undefined as any)).toBe('');
+    });
+  });
+
+  describe('stripCardNumber / cleanCardNumber', () => {
+    it('strips all spaces and non-numeric characters to return clean digits', () => {
+      expect(stripCardNumber('4000 0000 0000 0002')).toBe('4000000000000002');
+      expect(cleanCardNumber('5555 5100 0008 1006')).toBe('5555510000081006');
+      expect(stripCardNumber('4000-0000-0000-0002')).toBe('4000000000000002');
+    });
+
+    it('caps clean digits at 16', () => {
+      expect(stripCardNumber('12345678901234567890')).toBe('1234567890123456');
+    });
+
+    it('handles empty or invalid inputs gracefully', () => {
+      expect(stripCardNumber('')).toBe('');
+      expect(cleanCardNumber(null as any)).toBe('');
     });
   });
 });

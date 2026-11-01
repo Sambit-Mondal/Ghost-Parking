@@ -42,3 +42,26 @@ export const formatTimeAgo = (date: string | Date): string => {
   const diffInDays = Math.floor(diffInHours / 24);
   return `${diffInDays}d ago`;
 };
+
+/**
+ * Formats raw card input by stripping non-numeric characters, capping at 16 digits,
+ * and grouping into 4-digit blocks separated by a single space (max 19 characters).
+ * e.g., "4000 0000 0000 0002"
+ */
+export const formatCardNumber = (value: string): string => {
+  if (!value) return '';
+  const cleanDigits = value.replace(/\D/g, '').slice(0, 16);
+  return cleanDigits.replace(/(\d{4})/g, '$1 ').trim();
+};
+
+/**
+ * Strips all spaces and non-numeric characters from a card number string,
+ * returning raw numeric digits (up to 16 digits) for payload submission.
+ */
+export const stripCardNumber = (value: string): string => {
+  if (!value) return '';
+  return value.replace(/\D/g, '').slice(0, 16);
+};
+
+export const cleanCardNumber = stripCardNumber;
+
