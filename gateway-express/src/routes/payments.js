@@ -3,6 +3,7 @@ const router = express.Router();
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
 const prisma = require('../lib/prisma');
+const { emitBookingUpdated } = require('../lib/socket');
 
 // Initialize Razorpay SDK instance
 const razorpay = new Razorpay({
@@ -155,7 +156,13 @@ router.post('/create-order', async (req, res, next) => {
           total_amount: finalAmount,
           status: 'pending',
         },
+        include: {
+          driver: { select: { id: true, name: true, email: true } },
+          spot: { select: { id: true, title: true, address: true, hourly_rate: true, host_id: true } },
+        },
       });
+
+      emitBookingUpdated(newBooking, driver.id, spot.host_id);
 
       targetBookingId = newBooking.id;
     }
@@ -398,7 +405,13 @@ router.post('/verify', async (req, res, next) => {
         razorpay_payment_id,
         status: 'active',
       },
+      include: {
+        driver: { select: { id: true, name: true, email: true } },
+        spot: { select: { id: true, title: true, address: true, hourly_rate: true, host_id: true } },
+      },
     });
+
+    emitBookingUpdated(updatedBooking, updatedBooking.driver_id, updatedBooking.spot?.host_id);
 
     return res.json({
       message: 'Payment authorized and verified. Parking booking is now active.',
@@ -469,7 +482,13 @@ router.post('/checkout', async (req, res, next) => {
         status: 'completed',
         updated_at: new Date(),
       },
+      include: {
+        driver: { select: { id: true, name: true, email: true } },
+        spot: { select: { id: true, title: true, address: true, hourly_rate: true, host_id: true } },
+      },
     });
+
+    emitBookingUpdated(completedBooking, completedBooking.driver_id, completedBooking.spot?.host_id);
 
     return res.json({
       message: 'Checkout completed successfully. Payment captured and split via Razorpay Route.',
@@ -548,13 +567,18 @@ router.post('/webhook', async (req, res, next) => {
 
     // 1. Payment Authorized (Pre-authorization successful)
     if (eventName === 'payment.authorized') {
-      await prisma.bookings.update({
+      const activeBooking = await prisma.bookings.update({
         where: { id: booking.id },
         data: {
           razorpay_payment_id: paymentId,
           status: 'active',
         },
+        include: {
+          driver: { select: { id: true, name: true, email: true } },
+          spot: { select: { id: true, title: true, address: true, hourly_rate: true, host_id: true } },
+        },
       });
+      emitBookingUpdated(activeBooking, activeBooking.driver_id, activeBooking.spot?.host_id);
       console.log(`[Razorpay Webhook] Booking ${booking.id} marked ACTIVE after pre-authorization`);
       return res.json({ status: 'authorized', booking_id: booking.id });
     }
@@ -564,13 +588,18 @@ router.post('/webhook', async (req, res, next) => {
       const hostAccountId = booking.spot.host?.razorpay_account_id;
       const splitResult = await executeRazorpayRouteSplit(paymentId, booking, hostAccountId);
 
-      await prisma.bookings.update({
+      const completedBooking = await prisma.bookings.update({
         where: { id: booking.id },
         data: {
           razorpay_payment_id: paymentId,
           status: 'completed',
         },
+        include: {
+          driver: { select: { id: true, name: true, email: true } },
+          spot: { select: { id: true, title: true, address: true, hourly_rate: true, host_id: true } },
+        },
       });
+      emitBookingUpdated(completedBooking, completedBooking.driver_id, completedBooking.spot?.host_id);
 
       console.log(`[Razorpay Webhook] Booking ${booking.id} COMPLETED. 80% split sent to ${hostAccountId}`);
       return res.json({
