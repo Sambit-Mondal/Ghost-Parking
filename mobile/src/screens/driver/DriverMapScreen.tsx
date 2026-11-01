@@ -21,7 +21,7 @@ import { MapPlaceholder } from '../../components/driver/MapPlaceholder';
 import { DriverMapView } from '../../components/driver/DriverMapView';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
-import { formatCurrency } from '../../utils/formatting';
+import { formatCurrency, formatCardNumber, stripCardNumber } from '../../utils/formatting';
 import { fetchNearbySpots, normalizeSpot } from '../../services/spotService';
 import { connectSocket, onSpotAdded, onSpotUpdated } from '../../services/socketService';
 import {
@@ -62,9 +62,17 @@ export const DriverMapScreen: React.FC = () => {
     amount: number;
   } | null>(null);
   const [testCardNumber, setTestCardNumber] = useState('4000 0000 0000 0002');
+  const [rawCardNumber, setRawCardNumber] = useState('4000000000000002');
   const [testExpiry, setTestExpiry] = useState('12/30');
   const [testCvv, setTestCvv] = useState('123');
   const [testCardholder, setTestCardholder] = useState('Verified Driver');
+
+  const handleCardNumberChange = useCallback((text: string) => {
+    const formatted = formatCardNumber(text);
+    const raw = stripCardNumber(text);
+    setTestCardNumber(formatted);
+    setRawCardNumber(raw);
+  }, []);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -353,7 +361,7 @@ export const DriverMapScreen: React.FC = () => {
 
   /**
    * Authorizes manual test card details entered in the Razorpay Test Modal
-   * and cryptographically verifies with Express Gateway.
+   * and cryptographically verifies directly with Express Gateway via POST /payments/verify.
    */
   const handleExecuteTestCardPayment = async () => {
     if (!pendingOrderData || !selectedSpot) return;
@@ -362,28 +370,17 @@ export const DriverMapScreen: React.FC = () => {
     setPaymentError(null);
 
     try {
-      // 1. Authorize test card on Express Gateway
-      const cardRes = await processTestCardPayment(
-        {
-          order_id: pendingOrderData.orderId,
-          card_number: testCardNumber,
-          expiry: testExpiry,
-          cvv: testCvv,
-        },
-        userToken
-      );
+      // Strip spaces out to ensure clean numerical payload is passed to backend
+      const cleanCard = rawCardNumber || stripCardNumber(testCardNumber);
 
-      if (!cardRes.success || !cardRes.razorpay_signature || !cardRes.razorpay_payment_id) {
-        throw new Error(cardRes.error || 'Card payment authorization failed');
-      }
-
-      // 2. Cryptographically Verify Signature with Express Gateway (HMAC-SHA256)
+      // Verify payment directly with Express Gateway POST /payments/verify
       const verifyRes = await verifyPayment(
         {
           booking_id: pendingOrderData.bookingId,
-          razorpay_order_id: cardRes.razorpay_order_id || pendingOrderData.orderId,
-          razorpay_payment_id: cardRes.razorpay_payment_id,
-          razorpay_signature: cardRes.razorpay_signature,
+          razorpay_order_id: pendingOrderData.orderId,
+          card_number: cleanCard,
+          expiry: testExpiry,
+          cvv: testCvv,
         },
         userToken
       );
@@ -392,11 +389,11 @@ export const DriverMapScreen: React.FC = () => {
         throw new Error(verifyRes.error || 'Payment signature verification failed');
       }
 
-      // 3. Update confirmed booking state upon verified active status
+      // Update confirmed booking state upon verified active status
       setActivePaymentRecord({
-        bookingId: pendingOrderData.bookingId,
-        paymentId: cardRes.razorpay_payment_id,
-        orderId: cardRes.razorpay_order_id || pendingOrderData.orderId,
+        bookingId: verifyRes.booking?.id || pendingOrderData.bookingId,
+        paymentId: verifyRes.razorpay_payment_id || `pay_test_${Date.now()}`,
+        orderId: verifyRes.razorpay_order_id || pendingOrderData.orderId,
         hours: bookingHours,
         amount: pendingOrderData.amount,
         spot: selectedSpot,
@@ -679,12 +676,14 @@ export const DriverMapScreen: React.FC = () => {
                 <View style={styles.testInputGroup}>
                   <Text style={styles.testInputLabel}>Test Card Number</Text>
                   <TextInput
+                    testID="test-card-number-input"
                     style={styles.testTextInput}
                     value={testCardNumber}
-                    onChangeText={setTestCardNumber}
+                    onChangeText={handleCardNumberChange}
                     placeholder="4000 0000 0000 0002"
                     placeholderTextColor={colors.textMuted}
                     keyboardType="number-pad"
+                    maxLength={19}
                     editable={!isProcessingPayment}
                   />
                 </View>

@@ -35,15 +35,22 @@ export interface RazorpayPaymentSuccess {
 }
 
 export interface VerifyPaymentParams {
-  booking_id: string;
+  booking_id?: string;
   razorpay_order_id: string;
-  razorpay_payment_id: string;
-  razorpay_signature: string;
+  razorpay_payment_id?: string;
+  razorpay_signature?: string;
+  card_number?: string;
+  expiry?: string;
+  cvv?: string;
 }
 
 export interface VerifyPaymentResponse {
   success: boolean;
   booking?: any;
+  razorpay_payment_id?: string;
+  razorpay_order_id?: string;
+  razorpay_signature?: string;
+  route_split?: any;
   error?: string;
 }
 
@@ -242,6 +249,10 @@ export async function verifyPayment(
   return {
     success: true,
     booking: data.booking,
+    razorpay_payment_id: data.razorpay_payment_id,
+    razorpay_order_id: data.razorpay_order_id,
+    razorpay_signature: data.razorpay_signature,
+    route_split: data.route_split,
   };
 }
 

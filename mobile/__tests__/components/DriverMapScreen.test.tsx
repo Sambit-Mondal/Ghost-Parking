@@ -203,4 +203,41 @@ describe('Component Test: DriverMapScreen', () => {
       expect(getByTestId('map-marker-spot-ws-live-999')).toBeTruthy();
     });
   });
+
+  it('formats card input dynamically, enforces maxLength=19, and submits clean payload on Authorize & Pay', async () => {
+    const paymentService = require('../../src/services/paymentService');
+    paymentService.isNativeRazorpayAvailable.mockReturnValueOnce(false);
+
+    const { getByTestId, findByTestId, getByText } = renderScreen();
+    const reserveBtn = await findByTestId(`spot-card-${MOCK_NEARBY_SPOTS[0].id}-reserve-btn`);
+    fireEvent.press(reserveBtn);
+
+    const confirmBtn = getByTestId('confirm-booking-btn');
+    fireEvent.press(confirmBtn);
+
+    // In Expo Go mode, opens the test checkout modal
+    const testModal = await findByTestId('razorpay-test-modal');
+    expect(testModal).toBeTruthy();
+
+    const cardInput = getByTestId('test-card-number-input');
+    expect(cardInput.props.maxLength).toBe(19);
+
+    // Enter unformatted card number with spaces / mixed characters
+    fireEvent.changeText(cardInput, '5555510000081006');
+    expect(cardInput.props.value).toBe('5555 5100 0008 1006');
+
+    // Click Authorize & Pay
+    const submitBtn = getByTestId('submit-test-payment-btn');
+    fireEvent.press(submitBtn);
+
+    await waitFor(() => {
+      expect(paymentService.verifyPayment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          card_number: '5555510000081006',
+          razorpay_order_id: 'order_test_mock_123',
+        }),
+        expect.anything()
+      );
+    });
+  });
 });
