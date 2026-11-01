@@ -281,3 +281,50 @@ export async function toggleSpotPause(
     };
   }
 }
+
+/**
+ * Fetches user-scoped parking spots owned by the authenticated host via GET /spots/me
+ */
+export async function fetchMySpots(
+  token?: string | null
+): Promise<{ success: boolean; spots: any[]; error?: string }> {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/spots/me`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'x-client': 'ghost-parking-mobile',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        spots: [],
+        error: data.error || `Failed to fetch host spots (${response.status})`,
+      };
+    }
+
+    return {
+      success: true,
+      spots: Array.isArray(data.spots) ? data.spots : [],
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      spots: [],
+      error: err.message || 'Network request failed',
+    };
+  }
+}

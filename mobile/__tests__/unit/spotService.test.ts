@@ -1,4 +1,4 @@
-import { normalizeSpot, fetchNearbySpots } from '../../src/services/spotService';
+import { normalizeSpot, fetchNearbySpots, fetchMySpots } from '../../src/services/spotService';
 
 describe('Unit Test: spotService', () => {
   const originalFetch = (globalThis as any).fetch;
@@ -163,6 +163,56 @@ describe('Unit Test: spotService', () => {
       expect(result.success).toBe(false);
       expect(result.source).toBe('fallback_cache');
       expect(result.spots).toEqual([]);
+    });
+  });
+
+  describe('fetchMySpots', () => {
+    it('fetches host-scoped spots from GET /spots/me with Bearer token', async () => {
+      const mockHostSpots = [
+        {
+          id: 'spot-host-uuid-1',
+          title: 'My Covered Driveway',
+          address: 'Koramangala, Bangalore',
+          hourly_rate: 90,
+          is_active: true,
+          total_bookings: 5,
+          lifetime_earnings: 1200,
+        },
+      ];
+
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ count: 1, spots: mockHostSpots }),
+      } as any);
+
+      const res = await fetchMySpots('mock-host-jwt-token');
+      expect(res.success).toBe(true);
+      expect(res.spots.length).toBe(1);
+      expect(res.spots[0].title).toBe('My Covered Driveway');
+
+      expect((globalThis as any).fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/spots/me'),
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer mock-host-jwt-token',
+          }),
+        })
+      );
+    });
+
+    it('returns error when server responds with 401 unauthenticated', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: 'Access denied. No authentication token provided.' }),
+      } as any);
+
+      const res = await fetchMySpots(null);
+      expect(res.success).toBe(false);
+      expect(res.spots).toEqual([]);
+      expect(res.error).toContain('Access denied');
     });
   });
 });

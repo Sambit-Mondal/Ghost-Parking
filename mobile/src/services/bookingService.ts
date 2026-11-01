@@ -87,3 +87,51 @@ export async function checkInBooking(
     clearTimeout(timeoutId);
   }
 }
+
+/**
+ * Fetches user-scoped bookings for either driver or host via GET /bookings/me
+ */
+export async function fetchMyBookings(
+  token?: string | null
+): Promise<{ success: boolean; bookings: any[]; role?: string; error?: string }> {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/bookings/me`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'x-client': 'ghost-parking-mobile',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        bookings: [],
+        error: data.error || `Failed to fetch bookings (${response.status})`,
+      };
+    }
+
+    return {
+      success: true,
+      bookings: Array.isArray(data.bookings) ? data.bookings : [],
+      role: data.role,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      bookings: [],
+      error: err.message || 'Network request failed',
+    };
+  }
+}

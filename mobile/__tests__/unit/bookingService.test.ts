@@ -1,4 +1,4 @@
-import { checkInBooking } from '../../src/services/bookingService';
+import { checkInBooking, fetchMyBookings } from '../../src/services/bookingService';
 
 // Mock global fetch
 const originalFetch = (globalThis as any).fetch;
@@ -92,5 +92,55 @@ describe('Booking Service - Check-in API Client', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('Network request failed');
+  });
+
+  describe('fetchMyBookings', () => {
+    it('fetches user-scoped bookings from GET /bookings/me with JWT Authorization', async () => {
+      const mockBookings = [
+        {
+          id: 'booking-uuid-1',
+          driver_id: 'driver-uuid-1',
+          spot_id: 'spot-uuid-1',
+          status: 'active',
+          total_amount: 160,
+          spot: { title: 'MG Road Spot', address: 'Bangalore' },
+        },
+      ];
+
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ role: 'driver', count: 1, bookings: mockBookings }),
+      } as any);
+
+      const res = await fetchMyBookings('mock-driver-jwt');
+      expect(res.success).toBe(true);
+      expect(res.role).toBe('driver');
+      expect(res.bookings.length).toBe(1);
+      expect(res.bookings[0].id).toBe('booking-uuid-1');
+
+      expect((globalThis as any).fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/bookings/me'),
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer mock-driver-jwt',
+          }),
+        })
+      );
+    });
+
+    it('returns error when endpoint returns failure status', async () => {
+      (globalThis as any).fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: 'Invalid token.' }),
+      } as any);
+
+      const res = await fetchMyBookings(null);
+      expect(res.success).toBe(false);
+      expect(res.bookings).toEqual([]);
+      expect(res.error).toBe('Invalid token.');
+    });
   });
 });
