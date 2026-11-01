@@ -94,6 +94,20 @@ export function onNewSpotAvailable(callback: (spot: any) => void): () => void {
 }
 
 /**
+ * Subscribes to the targeted 'booking_updated' socket event for the authenticated user.
+ * Returns an unsubscribe cleanup function.
+ */
+export function onBookingUpdated(callback: (booking: any) => void): () => void {
+  const s = socket || connectSocket();
+
+  s.on('booking_updated', callback);
+
+  return () => {
+    s.off('booking_updated', callback);
+  };
+}
+
+/**
  * Disconnects the active socket connection.
  */
 export function disconnectSocket(): void {

@@ -88,6 +88,12 @@ jest.mock('./src/services/socketService', () => {
         listeners.delete('spot_updated');
       };
     }),
+    onBookingUpdated: jest.fn((cb) => {
+      listeners.set('booking_updated', cb);
+      return () => {
+        listeners.delete('booking_updated');
+      };
+    }),
     disconnectSocket: jest.fn(),
     getSocket: jest.fn(() => null),
     __emitMockEvent: (event, data) => {

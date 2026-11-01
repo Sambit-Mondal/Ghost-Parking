@@ -1,7 +1,13 @@
 // Unmock socketService for this unit test
 jest.unmock('../../src/services/socketService');
 
-import { connectSocket, onNewSpotAvailable, disconnectSocket, getSocket } from '../../src/services/socketService';
+import {
+  connectSocket,
+  onNewSpotAvailable,
+  onBookingUpdated,
+  disconnectSocket,
+  getSocket,
+} from '../../src/services/socketService';
 
 // Mock socket.io-client
 jest.mock('socket.io-client', () => {
@@ -68,6 +74,28 @@ describe('Unit Test: socketService', () => {
 
     unsubscribe();
     expect(s.off).toHaveBeenCalledWith('new_spot_available', expect.any(Function));
+  });
+
+  it('subscribes to "booking_updated" event and invokes callback on arrival', () => {
+    const mockCallback = jest.fn();
+    const unsubscribe = onBookingUpdated(mockCallback);
+
+    const s: any = getSocket();
+    expect(s.on).toHaveBeenCalledWith('booking_updated', expect.any(Function));
+
+    const sampleBooking = {
+      id: 'book-sample-123',
+      driver_id: 'usr-driver-1',
+      spot_id: 'spot-sample-1',
+      status: 'active',
+      total_amount: 160,
+    };
+
+    s.__trigger('booking_updated', sampleBooking);
+    expect(mockCallback).toHaveBeenCalledWith(sampleBooking);
+
+    unsubscribe();
+    expect(s.off).toHaveBeenCalledWith('booking_updated', expect.any(Function));
   });
 
   it('disconnects active socket cleanly', () => {
