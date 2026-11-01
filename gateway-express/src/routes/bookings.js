@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const { verifyToken } = require('../middleware/auth');
 const { emitBookingUpdated } = require('../lib/socket');
 
 const VALID_STATUSES = ['pending', 'active', 'completed', 'cancelled', 'disputed'];
@@ -129,6 +130,68 @@ router.get('/', async (req, res, next) => {
 
     return res.json({
       total,
+      count: bookings.length,
+      bookings,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /bookings/me
+ * User-scoped bookings endpoint.
+ * Protected with verifyToken.
+ * Checks user role in JWT:
+ * - If role === 'driver': returns bookings where driver_id matches req.user.id
+ * - If role === 'host': returns bookings where spot.host_id matches req.user.id
+ */
+router.get('/me', verifyToken, async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    if (!isUuid(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID in token' });
+    }
+
+    let where = {};
+    if (role === 'host') {
+      where = {
+        spot: {
+          host_id: userId,
+        },
+      };
+    } else {
+      where = {
+        driver_id: userId,
+      };
+    }
+
+    const bookings = await prisma.bookings.findMany({
+      where,
+      include: {
+        driver: {
+          select: { id: true, name: true, email: true, phone_number: true },
+        },
+        spot: {
+          select: {
+            id: true,
+            title: true,
+            address: true,
+            hourly_rate: true,
+            host_id: true,
+            host: {
+              select: { id: true, name: true, email: true },
+            },
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return res.json({
+      role,
       count: bookings.length,
       bookings,
     });

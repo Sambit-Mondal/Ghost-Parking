@@ -143,6 +143,57 @@ const handlePauseOrToggleSpot = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /spots/me
+ * Host-only route: Return only parking spots where host_id matches authenticated user's ID.
+ * Protected with verifyToken.
+ */
+router.get('/me', verifyToken, async (req, res, next) => {
+  try {
+    const hostId = req.user.id;
+
+    if (!isUuid(hostId)) {
+      return res.status(400).json({ error: 'Invalid user ID in token' });
+    }
+
+    const spots = await prisma.$queryRaw`
+      SELECT 
+        s.id, s.host_id, s.title, s.address, s.hourly_rate, s.is_active, s.created_at, s.updated_at,
+        ST_X(s.location::geometry) AS longitude,
+        ST_Y(s.location::geometry) AS latitude,
+        COUNT(b.id)::int AS total_bookings,
+        COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.total_amount ELSE 0 END), 0)::float AS lifetime_earnings
+      FROM parking_spots s
+      LEFT JOIN bookings b ON b.spot_id = s.id
+      WHERE s.host_id = ${hostId}::uuid
+      GROUP BY s.id, s.host_id, s.title, s.address, s.hourly_rate, s.is_active, s.created_at, s.updated_at, s.location
+      ORDER BY s.created_at DESC;
+    `;
+
+    const formattedSpots = (Array.isArray(spots) ? spots : []).map((s) => ({
+      id: s.id,
+      host_id: s.host_id,
+      title: s.title,
+      address: s.address,
+      latitude: parseFloat(s.latitude),
+      longitude: parseFloat(s.longitude),
+      hourly_rate: parseFloat(s.hourly_rate),
+      is_active: Boolean(s.is_active),
+      total_bookings: parseInt(s.total_bookings, 10) || 0,
+      lifetime_earnings: parseFloat(s.lifetime_earnings) || 0,
+      created_at: s.created_at,
+      updated_at: s.updated_at,
+    }));
+
+    return res.json({
+      count: formattedSpots.length,
+      spots: formattedSpots,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.patch('/:id/pause', handlePauseOrToggleSpot);
 router.patch('/:id/status', handlePauseOrToggleSpot);
 router.patch('/:id', handlePauseOrToggleSpot);

@@ -281,4 +281,53 @@ describe('Backend Test Suite: Role-Based JWT Authentication & Authorization', ()
       expect(res.body.user.email).toBe(testDriverEmail);
     });
   });
+
+  describe('5. User-Scoped Endpoints: GET /spots/me & GET /bookings/me', () => {
+    it('GET /spots/me blocks unauthenticated requests with 401', async () => {
+      const res = await request(app).get('/spots/me');
+      expect(res.status).toBe(401);
+    });
+
+    it('GET /spots/me returns strictly scoped spots owned by the authenticated host', async () => {
+      const res = await request(app)
+        .get('/spots/me')
+        .set('Authorization', `Bearer ${hostToken}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.spots)).toBe(true);
+      expect(res.body.count).toBeGreaterThanOrEqual(1);
+      // All returned spots must belong to this specific host
+      res.body.spots.forEach((spot) => {
+        expect(spot.host_id).toBe(hostUserId);
+      });
+    });
+
+    it('GET /bookings/me blocks unauthenticated requests with 401', async () => {
+      const res = await request(app).get('/bookings/me');
+      expect(res.status).toBe(401);
+    });
+
+    it('GET /bookings/me returns driver-scoped bookings when authenticated as driver', async () => {
+      const res = await request(app)
+        .get('/bookings/me')
+        .set('Authorization', `Bearer ${driverToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.role).toBe('driver');
+      expect(Array.isArray(res.body.bookings)).toBe(true);
+      res.body.bookings.forEach((booking) => {
+        expect(booking.driver_id).toBe(driverUserId);
+      });
+    });
+
+    it('GET /bookings/me returns host-scoped occupant bookings when authenticated as host', async () => {
+      const res = await request(app)
+        .get('/bookings/me')
+        .set('Authorization', `Bearer ${hostToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.role).toBe('host');
+      expect(Array.isArray(res.body.bookings)).toBe(true);
+    });
+  });
 });
