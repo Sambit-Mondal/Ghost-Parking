@@ -144,10 +144,19 @@ app.use((err, req, res, next) => {
   });
 });
 
+const http = require('http');
+const { initSocket } = require('./lib/socket');
+
+const server = http.createServer(app);
+const io = initSocket(server);
+app.set('io', io);
+app.set('server', server);
+
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`[Express Gateway] Server running on port ${PORT}`);
+  server.listen(PORT, () => {
+    console.log(`[Express Gateway] Server running with WebSocket on port ${PORT}`);
   });
 }
 
 module.exports = app;
+module.exports.server = server;
