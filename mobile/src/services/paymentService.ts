@@ -179,3 +179,80 @@ export async function verifyPayment(
   };
 }
 
+export interface HostTransactionItem {
+  id: string;
+  booking_id: string;
+  spot_id: string;
+  spot_title: string;
+  spot_address: string;
+  driver_name: string;
+  driver_email: string;
+  gross_amount: number;
+  host_net_earnings: number;
+  platform_fee: number;
+  status: string;
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
+  start_time?: string;
+  end_time?: string;
+  created_at?: string;
+}
+
+export interface HostEarningsResponse {
+  success: boolean;
+  host_id?: string;
+  total_net_earnings: number;
+  total_gross_earnings: number;
+  platform_fee_deducted: number;
+  active_bookings_count: number;
+  completed_bookings_count: number;
+  total_qualifying_bookings: number;
+  split_rule?: {
+    host_percentage: number;
+    platform_fee_percentage: number;
+  };
+  recent_transactions: HostTransactionItem[];
+  error?: string;
+}
+
+/**
+ * Step 4: Fetch Host's Aggregated Net Earnings & Recent Transactions from Express Gateway
+ */
+export async function fetchHostEarnings(token?: string | null): Promise<HostEarningsResponse> {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/host/earnings`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'x-client': 'ghost-parking-mobile',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.success) {
+    return {
+      success: false,
+      total_net_earnings: 0,
+      total_gross_earnings: 0,
+      platform_fee_deducted: 0,
+      active_bookings_count: 0,
+      completed_bookings_count: 0,
+      total_qualifying_bookings: 0,
+      recent_transactions: [],
+      error: data.error || `Failed to fetch host earnings (Status ${response.status})`,
+    };
+  }
+
+  return data;
+}
+
+
