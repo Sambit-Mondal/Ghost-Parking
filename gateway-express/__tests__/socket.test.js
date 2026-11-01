@@ -170,4 +170,139 @@ describe('Backend Test Suite: Real-Time WebSocket Spot Broadcasts', () => {
       })
       .catch((err) => done(err));
   });
+
+  describe('Private Socket Rooms & Targeted Booking Emissions', () => {
+    let driverSocket;
+    let hostSocket;
+    let unrelatedSocket;
+    const mockDriverUserId = '22222222-3333-4444-5555-666666666666';
+    const mockHostUserId = '33333333-4444-5555-6666-777777777777';
+    const mockOtherUserId = '44444444-5555-6666-7777-888888888888';
+
+    beforeAll((done) => {
+      const driverToken = jwt.sign({ id: mockDriverUserId, role: 'driver' }, JWT_SECRET, { expiresIn: '1h' });
+      const hostToken = jwt.sign({ id: mockHostUserId, role: 'host' }, JWT_SECRET, { expiresIn: '1h' });
+      const otherToken = jwt.sign({ id: mockOtherUserId, role: 'driver' }, JWT_SECRET, { expiresIn: '1h' });
+
+      driverSocket = io(`http://localhost:${serverPort}`, {
+        transports: ['websocket'],
+        auth: { token: driverToken },
+      });
+      hostSocket = io(`http://localhost:${serverPort}`, {
+        transports: ['websocket'],
+        auth: { token: hostToken },
+      });
+      unrelatedSocket = io(`http://localhost:${serverPort}`, {
+        transports: ['websocket'],
+        auth: { token: otherToken },
+      });
+
+      let connectedCount = 0;
+      const onConnect = () => {
+        connectedCount++;
+        if (connectedCount === 3) done();
+      };
+
+      driverSocket.on('connect', onConnect);
+      hostSocket.on('connect', onConnect);
+      unrelatedSocket.on('connect', onConnect);
+    });
+
+    afterAll(() => {
+      if (driverSocket) driverSocket.disconnect();
+      if (hostSocket) hostSocket.disconnect();
+      if (unrelatedSocket) unrelatedSocket.disconnect();
+    });
+
+    it('emits "booking_updated" targeted only to driver and host private rooms', (done) => {
+      const { emitBookingUpdated } = require('../src/lib/socket');
+      const testBooking = {
+        id: 'book-target-test-1',
+        driver_id: mockDriverUserId,
+        status: 'active',
+        total_amount: 240,
+        spot: {
+          id: 'spot-target-test-1',
+          title: 'Targeted Bay',
+          host_id: mockHostUserId,
+        },
+      };
+
+      let driverReceived = false;
+      let hostReceived = false;
+      let unrelatedReceived = false;
+
+      unrelatedSocket.on('booking_updated', () => {
+        unrelatedReceived = true;
+      });
+
+      driverSocket.once('booking_updated', (data) => {
+        expect(data.id).toBe(testBooking.id);
+        expect(data.status).toBe('active');
+        driverReceived = true;
+        checkComplete();
+      });
+
+      hostSocket.once('booking_updated', (data) => {
+        expect(data.id).toBe(testBooking.id);
+        expect(data.status).toBe('active');
+        hostReceived = true;
+        checkComplete();
+      });
+
+      const checkComplete = () => {
+        if (driverReceived && hostReceived) {
+          setTimeout(() => {
+            expect(unrelatedReceived).toBe(false);
+            done();
+          }, 50);
+        }
+      };
+
+      emitBookingUpdated(testBooking, mockDriverUserId, mockHostUserId);
+    });
+
+    it('emits "booking_updated" to private room when driver checks in via POST /bookings/check-in', (done) => {
+      const checkInBookingId = '11111111-aaaa-bbbb-cccc-222222222222';
+
+      jest.spyOn(prisma.bookings, 'findUnique').mockResolvedValue({
+        id: checkInBookingId,
+        driver_id: mockDriverUserId,
+        spot_id: 'spot-123',
+        status: 'pending',
+        driver: { id: mockDriverUserId, name: 'Driver Test', email: 'd@test.com' },
+        spot: { id: 'spot-123', title: 'CheckIn Spot', address: 'MG Road', hourly_rate: 80, host_id: mockHostUserId },
+      });
+
+      jest.spyOn(prisma.bookings, 'update').mockResolvedValue({
+        id: checkInBookingId,
+        driver_id: mockDriverUserId,
+        spot_id: 'spot-123',
+        status: 'active',
+        driver: { id: mockDriverUserId, name: 'Driver Test', email: 'd@test.com' },
+        spot: { id: 'spot-123', title: 'CheckIn Spot', address: 'MG Road', hourly_rate: 80, host_id: mockHostUserId },
+      });
+
+      driverSocket.once('booking_updated', (data) => {
+        try {
+          expect(data.id).toBe(checkInBookingId);
+          expect(data.status).toBe('active');
+          done();
+        } catch (err) {
+          done(err);
+        }
+      });
+
+      request(app)
+        .post('/bookings/check-in')
+        .send({
+          booking_id: checkInBookingId,
+          latitude: 12.9716,
+          longitude: 77.5946,
+          distance_meters: 15,
+        })
+        .expect(200)
+        .catch((err) => done(err));
+    });
+  });
 });
