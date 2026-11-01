@@ -483,15 +483,26 @@ Ghost-Parking/
    - Card number fields automatically enforce a 19-character limit (`XXXX XXXX XXXX XXXX`) via `formatCardNumber`.
    - Raw digits are stripped of non-numeric characters via `stripCardNumber` prior to payload dispatch to `/payments/verify`.
    - Payment signatures are validated using standard `HMAC-SHA256` matching Razorpay's cryptographic specification:
-     $$\text{Signature} = \text{HMAC-SHA256}(\text{order\_id} \parallel \text{payment\_id}, \, \text{secret})$$
+
+   ```text
+   signature = HMAC-SHA256(order_id + "|" + payment_id, secret)
+   ```
 
 2. **Host Split Calculation**:
-   - Financial distributions are determined according to:
-     $$\text{Host Share} = \text{round}(\text{Total Paice} \times 0.80)$$
-     $$\text{Platform Commission} = \text{Total Paise} - \text{Host Share}$$
+   - Financial distributions are calculated dynamically upon payment authorization:
+
+   ```text
+   Host Net Earnings (80%)  = round(Total Amount * 0.80)
+   Platform Commission (20%) = Total Amount - Host Net Earnings
+   ```
+
    - Payout transfers to host linked accounts (`razorpay_account_id`) are executed immediately upon payment verification or held in platform escrow if pending account association.
 
 3. **Geofenced Check-In Constraint**:
    - Euclidean spatial distance is computed via the spherical law of cosines:
-     $$D = 2R \arcsin\left(\sqrt{\sin^2\left(\frac{\Delta \phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta \lambda}{2}\right)}\right)$$
-   - Check-in is authorized if and only if $D \le 50\text{ meters}$.
+
+   $$
+   D = 2R \arcsin\left(\sqrt{\sin^2\left(\frac{\Delta \phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta \lambda}{2}\right)}\right)
+   $$
+
+   - Check-in is authorized if and only if distance constraint $D \le 50\text{ meters}$ is satisfied.
