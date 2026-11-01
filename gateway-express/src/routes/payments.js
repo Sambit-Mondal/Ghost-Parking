@@ -246,19 +246,32 @@ router.post('/create-order', async (req, res, next) => {
  */
 router.post('/process-test-card', async (req, res, next) => {
   try {
-    const { order_id, card_number, expiry, cvv } = req.body;
+    const { order_id, booking_id, card_number, expiry, cvv } = req.body;
 
-    if (!order_id) {
-      return res.status(400).json({ error: 'order_id is required' });
+    if (!order_id && !booking_id) {
+      return res.status(400).json({ error: 'order_id or booking_id is required' });
     }
 
-    // Locate the pending booking with this razorpay_order_id
-    const booking = await prisma.bookings.findFirst({
-      where: { razorpay_order_id: order_id },
-    });
+    // Locate the pending booking with razorpay_order_id or booking_id
+    let booking = null;
+    if (order_id) {
+      booking = await prisma.bookings.findFirst({
+        where: { razorpay_order_id: order_id },
+      });
+    }
+    if (!booking && booking_id && isUuid(booking_id)) {
+      booking = await prisma.bookings.findUnique({
+        where: { id: booking_id },
+      });
+    }
 
     if (!booking) {
       return res.status(404).json({ error: 'Booking associated with order_id not found' });
+    }
+
+    const resolvedOrderId = order_id || booking.razorpay_order_id;
+    if (!resolvedOrderId) {
+      return res.status(400).json({ error: 'No razorpay_order_id associated with this booking' });
     }
 
     const razorpaySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -278,13 +291,13 @@ router.post('/process-test-card', async (req, res, next) => {
     // Cryptographic HMAC SHA256 signature calculated with server secret
     const signature = crypto
       .createHmac('sha256', razorpaySecret)
-      .update(`${order_id}|${paymentId}`)
+      .update(`${resolvedOrderId}|${paymentId}`)
       .digest('hex');
 
     return res.json({
       success: true,
       razorpay_payment_id: paymentId,
-      razorpay_order_id: order_id,
+      razorpay_order_id: resolvedOrderId,
       razorpay_signature: signature,
       status: 'authorized',
     });
@@ -411,68 +424,117 @@ router.post('/order', async (req, res, next) => {
 
 /**
  * POST /payments/verify
- * Verifies payment authorization and transitions booking to 'active'
+ * Verifies payment authorization and transitions booking to 'active'.
+ * Supports both native SDK signatures (razorpay_payment_id + razorpay_signature)
+ * and in-app test card authorization (card_number) for Expo Go environments.
  */
 router.post('/verify', async (req, res, next) => {
   try {
-    const { booking_id, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const {
+      booking_id,
+      razorpay_order_id,
+      order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      card_number,
+      expiry,
+      cvv,
+    } = req.body;
 
-    if (!booking_id || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    const resolvedOrderId = razorpay_order_id || order_id;
+
+    if (!resolvedOrderId && !booking_id) {
       return res.status(400).json({
-        error: 'Missing required parameters: booking_id, razorpay_order_id, razorpay_payment_id, razorpay_signature',
+        error: 'Missing required parameters: razorpay_order_id or booking_id is required',
       });
     }
 
-    if (!isUuid(booking_id)) {
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-
-    const booking = await prisma.bookings.findUnique({
-      where: { id: booking_id },
-      include: {
-        driver: { select: { id: true, name: true, email: true } },
-        spot: {
-          include: {
-            host: { select: { id: true, name: true, email: true, razorpay_account_id: true } },
+    // Locate booking by UUID booking_id or by razorpay_order_id fallback
+    let booking = null;
+    if (booking_id && isUuid(booking_id)) {
+      booking = await prisma.bookings.findUnique({
+        where: { id: booking_id },
+        include: {
+          driver: { select: { id: true, name: true, email: true } },
+          spot: {
+            include: {
+              host: { select: { id: true, name: true, email: true, razorpay_account_id: true } },
+            },
           },
         },
-      },
-    });
+      });
+    }
+
+    if (!booking && resolvedOrderId) {
+      booking = await prisma.bookings.findFirst({
+        where: { razorpay_order_id: resolvedOrderId },
+        include: {
+          driver: { select: { id: true, name: true, email: true } },
+          spot: {
+            include: {
+              host: { select: { id: true, name: true, email: true, razorpay_account_id: true } },
+            },
+          },
+        },
+      });
+    }
 
     if (!booking) {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    if (booking.razorpay_order_id && booking.razorpay_order_id !== razorpay_order_id) {
+    const effectiveOrderId = resolvedOrderId || booking.razorpay_order_id;
+    if (booking.razorpay_order_id && effectiveOrderId && booking.razorpay_order_id !== effectiveOrderId) {
       return res.status(400).json({ error: 'Order ID does not match booking record' });
     }
 
-    // Cryptographic HMAC SHA256 Signature Verification
     const razorpaySecret = process.env.RAZORPAY_KEY_SECRET;
     if (!razorpaySecret) {
       return res.status(500).json({ error: 'Server configuration error: Razorpay secret missing' });
     }
 
-    const expectedSignature = crypto
-      .createHmac('sha256', razorpaySecret)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest('hex');
+    let paymentId = razorpay_payment_id;
+    let signature = razorpay_signature;
 
-    if (expectedSignature !== razorpay_signature) {
-      return res.status(400).json({ error: 'Invalid payment signature' });
+    if (paymentId && signature) {
+      // Cryptographic HMAC SHA256 Signature Verification for native SDK callbacks
+      const expectedSignature = crypto
+        .createHmac('sha256', razorpaySecret)
+        .update(`${effectiveOrderId}|${paymentId}`)
+        .digest('hex');
+
+      if (expectedSignature !== signature) {
+        return res.status(400).json({ error: 'Invalid payment signature' });
+      }
+    } else if (card_number) {
+      // In-app test card authorization (Expo Go sandbox)
+      const cleanCard = String(card_number).replace(/\s+/g, '');
+      if (cleanCard.length < 13 || cleanCard.length > 19) {
+        return res.status(400).json({ error: 'Invalid test card number length' });
+      }
+
+      paymentId = `pay_test_${crypto.randomBytes(8).toString('hex')}`;
+      signature = crypto
+        .createHmac('sha256', razorpaySecret)
+        .update(`${effectiveOrderId}|${paymentId}`)
+        .digest('hex');
+    } else {
+      return res.status(400).json({
+        error: 'Missing required parameters: razorpay_payment_id and razorpay_signature, or test card_number',
+      });
     }
 
     // Execute Razorpay Route logic: Transfer 80% to Host linked account, retain 20% platform fee
     const split = calculateRouteSplit(booking.total_amount);
     const hostAccountId = booking.spot?.host?.razorpay_account_id || 'acc_ghost_host_882';
-    const routeResult = await executeRazorpayRouteSplit(razorpay_payment_id, booking, hostAccountId);
+    const routeResult = await executeRazorpayRouteSplit(paymentId, booking, hostAccountId);
 
     const updatedBooking = await prisma.bookings.update({
-      where: { id: booking_id },
+      where: { id: booking.id },
       data: {
         total_amount: booking.total_amount,
-        razorpay_order_id,
-        razorpay_payment_id,
+        razorpay_order_id: effectiveOrderId,
+        razorpay_payment_id: paymentId,
         status: 'active',
       },
       include: {
@@ -487,6 +549,9 @@ router.post('/verify', async (req, res, next) => {
       success: true,
       message: 'Payment authorized and verified. Parking booking is now active and split via Razorpay Route.',
       booking: updatedBooking,
+      razorpay_payment_id: paymentId,
+      razorpay_order_id: effectiveOrderId,
+      razorpay_signature: signature,
       route_split: {
         total_amount: split.totalRupees,
         host_net_earnings_80_percent: split.hostShareRupees,

@@ -188,6 +188,37 @@ describe('Backend Test Suite: Razorpay Payments & Order Creation Flow', () => {
     expect(verifyRes.body.success).toBe(true);
   });
 
+  it('POST /payments/verify - seamlessly processes test card input and resolves booking by razorpay_order_id without 404', async () => {
+    // Create new order for booking
+    const orderRes = await request(app)
+      .post('/payments/create-order')
+      .send({
+        booking_id: bookingId,
+      });
+
+    expect(orderRes.status).toBe(201);
+    const orderId = orderRes.body.order_id;
+
+    // Send direct verification request with test card and non-UUID fallback booking_id
+    const verifyRes = await request(app)
+      .post('/payments/verify')
+      .send({
+        booking_id: 'bk_ephemeral_client_mock',
+        razorpay_order_id: orderId,
+        card_number: '5555 5100 0008 1006',
+        expiry: '12/30',
+        cvv: '123',
+      });
+
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.success).toBe(true);
+    expect(verifyRes.body.booking.status).toBe('active');
+    expect(verifyRes.body.razorpay_payment_id).toMatch(/^pay_test_/);
+    expect(verifyRes.body.razorpay_order_id).toBe(orderId);
+    expect(verifyRes.body.razorpay_signature).toBeDefined();
+    expect(verifyRes.body.route_split.host_net_earnings_80_percent).toBe(240);
+  });
+
   it('GET /host/earnings - returns 401 when unauthenticated', async () => {
     const res = await request(app).get('/host/earnings');
     expect(res.status).toBe(401);
