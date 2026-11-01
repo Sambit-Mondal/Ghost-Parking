@@ -25,7 +25,8 @@ import { Button } from '../../components/common/Button';
 import { formatCurrency, calculateHostSplit } from '../../utils/formatting';
 import { useAuth } from '../../context/AuthContext';
 import { createSpot, toggleSpotPause, fetchMySpots } from '../../services/spotService';
-import { connectSocket, onSpotAdded, onSpotUpdated } from '../../services/socketService';
+import { fetchHostEarnings, HostEarningsResponse } from '../../services/paymentService';
+import { connectSocket, onSpotAdded, onSpotUpdated, onBookingUpdated } from '../../services/socketService';
 
 export const DEFAULT_HOST_COORDS = {
   latitude: 12.9716,
@@ -121,6 +122,7 @@ export interface HostListingItem {
 export const HostListingsScreen: React.FC = () => {
   const { userToken } = useAuth();
   const [listings, setListings] = useState<HostListingItem[]>([]);
+  const [earningsData, setEarningsData] = useState<HostEarningsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -142,16 +144,25 @@ export const HostListingsScreen: React.FC = () => {
   const mapRef = useRef<MapView | null>(null);
 
   /**
-   * Fetches live user-scoped spots owned by the authenticated host via GET /spots/me
+   * Fetches live user-scoped spots and aggregated host earnings via GET /spots/me and GET /host/earnings
    */
-  const loadMySpots = useCallback(async (isRefresh = false) => {
+  const loadDashboardData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setIsRefreshing(true);
     else setIsLoading(true);
 
     try {
-      const res = await fetchMySpots(userToken);
-      if (isMountedRef.current && res.success && Array.isArray(res.spots)) {
-        setListings(res.spots);
+      const [spotsRes, earningsRes] = await Promise.all([
+        fetchMySpots(userToken),
+        fetchHostEarnings(userToken),
+      ]);
+
+      if (isMountedRef.current) {
+        if (spotsRes && spotsRes.success && Array.isArray(spotsRes.spots)) {
+          setListings(spotsRes.spots);
+        }
+        if (earningsRes && earningsRes.success) {
+          setEarningsData(earningsRes);
+        }
       }
     } catch {
       // Keep existing state
@@ -165,7 +176,7 @@ export const HostListingsScreen: React.FC = () => {
 
   useEffect(() => {
     isMountedRef.current = true;
-    loadMySpots();
+    loadDashboardData();
 
     // Attach real-time WebSocket listeners
     connectSocket({ token: userToken });
@@ -195,15 +206,31 @@ export const HostListingsScreen: React.FC = () => {
       );
     });
 
+    const unsubBookingUpdated = onBookingUpdated(() => {
+      if (isMountedRef.current) {
+        // Automatically re-fetch live net earnings when bookings change or payments settle
+        fetchHostEarnings(userToken).then((res) => {
+          if (isMountedRef.current && res && res.success) {
+            setEarningsData(res);
+          }
+        }).catch(() => {});
+      }
+    });
+
     return () => {
       isMountedRef.current = false;
       unsubAdded();
       unsubUpdated();
+      unsubBookingUpdated();
     };
-  }, [userToken, loadMySpots]);
+  }, [userToken, loadDashboardData]);
 
-  const totalEarnings = listings.reduce((sum, spot) => sum + (spot.lifetime_earnings || 0), 0);
-  const { hostShare } = calculateHostSplit(totalEarnings);
+  // Aggregate live net earnings (80% net host payout)
+  const totalNetEarnings =
+    earningsData && typeof earningsData.total_net_earnings === 'number'
+      ? earningsData.total_net_earnings
+      : calculateHostSplit(listings.reduce((sum, spot) => sum + (spot.lifetime_earnings || 0), 0)).hostShare;
+
   const activeCount = listings.filter((l) => l.is_active).length;
 
   const toggleListingActive = async (id: string) => {
@@ -336,7 +363,7 @@ export const HostListingsScreen: React.FC = () => {
         lifetime_earnings: 0,
       };
 
-      setListings([newSpot, ...listings]);
+      setListings((prev) => [newSpot, ...prev]);
       setNewTitle('');
       setNewAddress('');
       setNewRate('100');
@@ -360,7 +387,7 @@ export const HostListingsScreen: React.FC = () => {
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
-            onRefresh={() => loadMySpots(true)}
+            onRefresh={() => loadDashboardData(true)}
             tintColor={colors.primary}
             colors={[colors.primary]}
           />
@@ -371,9 +398,9 @@ export const HostListingsScreen: React.FC = () => {
           <Card style={styles.kpiCard}>
             <Text style={styles.kpiLabel}>Net Host Earnings (80%)</Text>
             <Text style={styles.kpiValue} testID="host-kpi-earnings">
-              {formatCurrency(hostShare)}
+              {formatCurrency(totalNetEarnings)}
             </Text>
-            <Text style={styles.kpiSub}>Auto-settled to Razorpay</Text>
+            <Text style={styles.kpiSub}>Auto-settled via Razorpay Route</Text>
           </Card>
 
           <Card style={styles.kpiCard}>
@@ -472,6 +499,70 @@ export const HostListingsScreen: React.FC = () => {
               </Card>
             );
           })
+        )}
+
+        {/* Recent Transactions & Escrow Split Section */}
+        <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+          <View>
+            <Text style={styles.sectionTitle}>Recent Transactions</Text>
+            <Text style={styles.sectionSubtitle}>
+              Itemized 80% net earnings per booking (after 20% platform deduction)
+            </Text>
+          </View>
+        </View>
+
+        {earningsData?.recent_transactions && earningsData.recent_transactions.length > 0 ? (
+          earningsData.recent_transactions.map((tx) => (
+            <Card key={tx.id} testID={`transaction-item-${tx.id}`} style={styles.txCard}>
+              <View style={styles.txHeader}>
+                <View style={styles.txTitleArea}>
+                  <Text style={styles.txSpotTitle}>{tx.spot_title}</Text>
+                  <Text style={styles.txDriverInfo}>
+                    Driver: {tx.driver_name}
+                  </Text>
+                </View>
+                <Badge
+                  label={tx.status.toUpperCase()}
+                  variant={tx.status === 'active' ? 'success' : 'neutral'}
+                />
+              </View>
+
+              <View style={styles.txBreakdown}>
+                <View style={styles.txCol}>
+                  <Text style={styles.txLabel}>Gross Paid</Text>
+                  <Text style={styles.txGross}>{formatCurrency(tx.gross_amount)}</Text>
+                </View>
+
+                <View style={styles.txDivider} />
+
+                <View style={styles.txCol}>
+                  <Text style={styles.txLabel}>Platform Cut (20%)</Text>
+                  <Text style={styles.txFee}>-{formatCurrency(tx.platform_fee)}</Text>
+                </View>
+
+                <View style={styles.txDivider} />
+
+                <View style={styles.txCol}>
+                  <Text style={styles.txLabel}>Your Net (80%)</Text>
+                  <Text style={styles.txNet}>+{formatCurrency(tx.host_net_earnings)}</Text>
+                </View>
+              </View>
+
+              {tx.razorpay_payment_id ? (
+                <Text style={styles.txRefText}>
+                  Razorpay Route: {tx.razorpay_payment_id}
+                </Text>
+              ) : null}
+            </Card>
+          ))
+        ) : (
+          <View style={styles.emptyTxCard} testID="empty-transactions-view">
+            <Ionicons name="receipt-outline" size={28} color={colors.textMuted} style={{ marginBottom: 6 }} />
+            <Text style={styles.emptyTxTitle}>No transactions recorded yet</Text>
+            <Text style={styles.emptyTxSubtitle}>
+              When drivers reserve your spots, your 80% net payouts will appear here in real-time.
+            </Text>
+          </View>
         )}
       </ScrollView>
 
@@ -960,5 +1051,99 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  txCard: {
+    marginBottom: 12,
+    padding: 14,
+    backgroundColor: colors.surface,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  txHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  txTitleArea: {
+    flex: 1,
+    marginRight: 10,
+  },
+  txSpotTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: 2,
+  },
+  txDriverInfo: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  txBreakdown: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 10,
+    padding: 10,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  txCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  txLabel: {
+    fontSize: 10,
+    color: colors.textMuted,
+    marginBottom: 3,
+    textTransform: 'uppercase',
+  },
+  txGross: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  txFee: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.danger,
+  },
+  txNet: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.success,
+  },
+  txDivider: {
+    width: 1,
+    height: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  txRefText: {
+    fontSize: 10,
+    color: colors.textMuted,
+    marginTop: 4,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  emptyTxCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    marginVertical: 8,
+  },
+  emptyTxTitle: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  emptyTxSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });

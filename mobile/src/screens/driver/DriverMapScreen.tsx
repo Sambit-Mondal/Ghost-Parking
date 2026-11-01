@@ -630,7 +630,7 @@ export const DriverMapScreen: React.FC = () => {
                   title={
                     isProcessingPayment
                       ? 'Processing with Razorpay...'
-                      : `Confirm & Reserve (${formatCurrency(
+                      : `Pay Now & Reserve (${formatCurrency(
                           (selectedSpot?.hourly_rate ?? 0) * bookingHours
                         )})`
                   }
