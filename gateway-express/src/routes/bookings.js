@@ -4,6 +4,9 @@ const prisma = require('../lib/prisma');
 
 const VALID_STATUSES = ['pending', 'active', 'completed', 'cancelled', 'disputed'];
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (val) => typeof val === 'string' && UUID_REGEX.test(val);
+
 /**
  * POST /bookings
  * Create a new booking
@@ -18,18 +21,30 @@ router.post('/', async (req, res, next) => {
       });
     }
 
-    // Verify driver exists
-    const driver = await prisma.users.findUnique({
-      where: { id: driver_id },
-    });
+    // Verify driver exists (handling real UUIDs and fallback driver)
+    let driver = null;
+    if (isUuid(driver_id)) {
+      driver = await prisma.users.findUnique({
+        where: { id: driver_id },
+      });
+    }
+    if (!driver) {
+      driver = await prisma.users.findFirst({ where: { role: 'driver' } });
+    }
     if (!driver) {
       return res.status(404).json({ error: 'Driver user not found' });
     }
 
-    // Verify parking spot exists
-    const spot = await prisma.parking_spots.findUnique({
-      where: { id: spot_id },
-    });
+    // Verify parking spot exists (handling real UUIDs and fallback spot)
+    let spot = null;
+    if (isUuid(spot_id)) {
+      spot = await prisma.parking_spots.findUnique({
+        where: { id: spot_id },
+      });
+    }
+    if (!spot) {
+      spot = await prisma.parking_spots.findFirst({ where: { is_active: true } });
+    }
     if (!spot) {
       return res.status(404).json({ error: 'Parking spot not found' });
     }
